@@ -1,0 +1,7 @@
+{
+  "name": "ai-native-controller",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=22.13"},
+  "dependencies": {"hono": "4.13.22", "@hono/node-server": "2.1.11"}
+}

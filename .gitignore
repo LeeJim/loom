@@ -1,0 +1,13 @@
+# Local credentials and runtime data
+secrets/
+data/
+.env
+.env.*
+*.pem
+*.key
+*.token
+*.sqlite
+*.sqlite-*
+node_modules/
+__pycache__/
+*.py[cod]

@@ -1,0 +1,20 @@
+[Unit]
+Description=ai-native workflow operations console
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/ai-native/release-plan-approval/console
+ExecStart=/usr/bin/python3 /opt/ai-native/release-plan-approval/console/server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ai-native/data
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+llm:
+  models:
+    - name: "deepseek/*"
+      provider: deepseek
+      params:
+        apiKey: "$DEEPSEEK_API_KEY"
+      transformation:
+        model: llmRequest.model.stripPrefix("deepseek/")

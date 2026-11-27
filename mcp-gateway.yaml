@@ -1,0 +1,7 @@
+mcp:
+  port: 3000
+  statefulMode: stateless
+  targets:
+    - name: workflow
+      mcp:
+        host: http://ai-native-mcp-upstream:3005/mcp

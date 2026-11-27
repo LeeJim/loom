@@ -1,0 +1,23 @@
+[Unit]
+Description=ai-native SQLite Workflow Worker
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ai-native/release-plan-approval
+Environment=AI_NATIVE_WORKER_ISSUE=13
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 /opt/ai-native/release-plan-approval/worker.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ai-native
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
