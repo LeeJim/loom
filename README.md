@@ -165,3 +165,7 @@ Controller 已部署对 `.github/workflows/ai-native-pr-validation.yml` 的签�
 旧任务与交付回执保持原状态。隔离测试覆盖方案先发、非所有者确认忽略、Issue 改动后旧确认失效，以及当前方案只执行一次。
 
 服务器实测 GitHub App 可读取 #15 及评论列表，OpenCode 能从允许文件生成只读实现方案。该冒烟测试未在现有 Issue 下发表评论，也未生成补丁。
+
+## GitHub Actions 部署
+
+Loom 的后续变更通过 PR 审查和校验，合并到 `main` 后由 GitHub Actions 触发部署。服务器需一次性配置专用发布入口与 `production` 环境。 [部署流水线说明](deploy/README.md)
