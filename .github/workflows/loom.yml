@@ -1,0 +1,68 @@
+name: Loom CI and deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch the exact revision
+        run: |
+          git init -q
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch --no-tags --depth=2 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Check source and build Controller
+        run: |
+          set -euo pipefail
+          git diff --check HEAD^ HEAD
+          node --check controller.mjs
+          node --check mcp-server.mjs
+          node --check console/app.js
+          python3 -m compileall -q -x '/\.git/' .
+          bash -n deploy/receive.sh
+          python3 -m unittest discover -s deploy -p 'test_*.py'
+          docker build --file controller.Dockerfile --tag loom-controller:check .
+
+  deploy:
+    if: github.repository == 'LeeJim/loom' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://ai.anyhub.cn/console/
+    concurrency:
+      group: loom-production
+      cancel-in-progress: false
+    permissions: {}
+    env:
+      DEPLOY_HOST: ${{ vars.LOOM_DEPLOY_HOST }}
+      DEPLOY_KEY: ${{ secrets.LOOM_DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOST: ${{ vars.LOOM_DEPLOY_KNOWN_HOST }}
+    steps:
+      - name: Deploy the verified main revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?Set production LOOM_DEPLOY_HOST}"
+          : "${DEPLOY_KEY:?Set production LOOM_DEPLOY_SSH_KEY}"
+          : "${DEPLOY_KNOWN_HOST:?Set production LOOM_DEPLOY_KNOWN_HOST}"
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/loom-key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOST" > "$RUNNER_TEMP/loom-known-hosts"
+          trap 'rm -f "$RUNNER_TEMP/loom-key" "$RUNNER_TEMP/loom-known-hosts"' EXIT
+          printf '%s\n' "$GITHUB_SHA" | ssh -T -i "$RUNNER_TEMP/loom-key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/loom-known-hosts" -o ConnectTimeout=15 \
+            "loom-deploy@$DEPLOY_HOST"
