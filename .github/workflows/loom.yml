@@ -27,7 +27,8 @@ jobs:
           git diff --check HEAD^ HEAD
           node --check controller.mjs
           node --check mcp-server.mjs
-          node --check console/app.js
+          npm ci --prefix console
+          npm test --prefix console
           python3 -m compileall -q -x '/\.git/' .
           bash -n deploy/receive.sh
           python3 -m unittest discover -s deploy -p 'test_*.py'
@@ -35,6 +36,7 @@ jobs:
           npm ci --prefix temporal
           npm test --prefix temporal
           docker build --file controller.Dockerfile --tag loom-controller:check .
+          docker build --tag loom-console:check console
 
   deploy:
     if: github.repository == 'LeeJim/loom' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

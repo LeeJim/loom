@@ -10,6 +10,9 @@ import rollout
 
 class RolloutTests(unittest.TestCase):
     def setUp(self):
+        prepare = patch.object(rollout, "prepare_console")
+        prepare.start()
+        self.addCleanup(prepare.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
@@ -17,7 +20,7 @@ class RolloutTests(unittest.TestCase):
         self.release.mkdir()
         self.systemd = self.root / "systemd"
         self.source = self.root / "source"
-        for name in ["worker.py", "console/server.py", "controller.mjs", "controller.Dockerfile"]:
+        for name in ["worker.py", "console/server/index.ts", "console/Dockerfile", "controller.mjs", "controller.Dockerfile"]:
             path = self.source / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
@@ -33,7 +36,11 @@ class RolloutTests(unittest.TestCase):
         with patch.object(rollout, "run") as run, patch.object(rollout, "healthy"):
             rollout.rollout(self.source, "a" * 40)
         self.assertTrue((self.release / ("a" * 40) / "worker.py").exists())
-        self.assertIn("ExecStart=/usr/bin/python3", next(self.systemd.glob("*/loom-release.conf")).read_text())
+        worker = self.systemd / "loom-worker.service.d/loom-release.conf"
+        console = self.systemd / "loom-console.service.d/loom-release.conf"
+        self.assertIn("ExecStart=/usr/bin/python3", worker.read_text())
+        self.assertIn("/console-runtime/bin/node", console.read_text())
+        self.assertIn("/console-runtime/dist/server/index.js", console.read_text())
         self.assertEqual(run.call_args.args[:2], ("docker", "rm"))
 
     def test_failed_health_restores_existing_overrides_and_container(self):
@@ -59,3 +66,26 @@ class RolloutTests(unittest.TestCase):
             rollout.rollout(self.source, "c" * 40)
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.args[:2], ("docker", "build"))
+
+class ConsoleRuntimeTests(unittest.TestCase):
+    def test_runtime_is_validated_and_published_before_service_switch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory)
+
+            def run(*args):
+                if args[:2] == ("docker", "cp"):
+                    staged = Path(args[-1])
+                    (staged / "dist/web").mkdir(parents=True)
+                    (staged / "dist/web/index.html").write_text("<html></html>")
+                if args[-1] == "--version":
+                    self.assertFalse((release / "console-runtime").exists())
+
+            with patch.object(rollout, "run", side_effect=run) as command, patch.object(
+                rollout, "output", return_value="build-container"
+            ):
+                rollout.prepare_console(release, "a" * 40)
+                self.assertTrue((release / "console-runtime/dist/web/index.html").is_file())
+                self.assertEqual(command.call_args.args, ("docker", "rm", "build-container"))
+                calls = command.call_count
+                rollout.prepare_console(release, "a" * 40)
+                self.assertEqual(command.call_count, calls)
