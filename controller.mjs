@@ -90,6 +90,44 @@ const recordAttempt = db.prepare(`
     AND validation.issue_number=request.issue_number AND request.pr_head=pr.head_sha
     AND validation.pr_head=pr.head_sha
 `);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS workflow_executions (
+    id INTEGER PRIMARY KEY, issue_number INTEGER NOT NULL, kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running', started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT, error TEXT
+  );
+  CREATE TABLE IF NOT EXISTS workflow_stage_events (
+    id INTEGER PRIMARY KEY, execution_id INTEGER NOT NULL REFERENCES workflow_executions(id),
+    stage TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS workflow_artifacts (
+    id INTEGER PRIMARY KEY, execution_id INTEGER NOT NULL REFERENCES workflow_executions(id),
+    stage TEXT NOT NULL, direction TEXT NOT NULL CHECK(direction IN ('input','output')),
+    payload TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+const loggedCiIssue = db.prepare('SELECT issue_number FROM ci_validations WHERE run_id=?');
+const logCiExecution = db.prepare(`
+  INSERT INTO workflow_executions (issue_number, kind, status, finished_at, error)
+  VALUES (?, 'ci_validation', ?, CURRENT_TIMESTAMP, ?)
+`);
+const logCiStage = db.prepare("INSERT INTO workflow_stage_events(execution_id,stage) VALUES (?, 'CI')");
+const logCiArtifact = db.prepare(`
+  INSERT INTO workflow_artifacts(execution_id,stage,direction,payload) VALUES (?, 'CI', ?, ?)
+`);
+
+function applyCiAttempt(attempt, conclusion, delivery, runId, sha, path) {
+  if (!recordAttempt.run(attempt, conclusion, delivery, runId, sha, path).changes) return;
+  const { issue_number: issue } = loggedCiIssue.get(runId);
+  const success = conclusion === 'success';
+  const execution = logCiExecution.run(issue, success ? 'completed' : 'failed', success ? null : conclusion).lastInsertRowid;
+  logCiStage.run(execution);
+  logCiArtifact.run(execution, 'input', JSON.stringify({ run_id: runId, attempt, head_sha: sha }));
+  logCiArtifact.run(execution, 'output', JSON.stringify({
+    conclusion, run_url: `https://github.com/${repository}/actions/runs/${runId}`,
+  }));
+}
+
 const outcomes = new Set(['success', 'failure', 'cancelled', 'timed_out', 'skipped', 'neutral',
   'action_required', 'stale', 'startup_failure']);
 const prWorkflow = '.github/workflows/loom-pr-validation.yml';
@@ -115,7 +153,7 @@ function reconcilePrCi() {
     registerPrCi.run(row.head_sha, row.issue_number, row.head_sha, prWorkflow);
     recordValidation.run(row.run_id, row.conclusion, `https://github.com/${repository}/actions/runs/${row.run_id}`,
       row.head_sha, prWorkflow);
-    recordAttempt.run(row.attempt, row.conclusion, row.delivery_id, row.run_id, row.head_sha, prWorkflow);
+    applyCiAttempt(row.attempt, row.conclusion, row.delivery_id, row.run_id, row.head_sha, prWorkflow);
     removePendingCi.run(row.delivery_id);
   }
   expirePendingCi.run();
@@ -211,7 +249,7 @@ app.post('/webhooks/github', bodyLimit({ maxSize: 1024 * 1024 }), async (c) => {
       recordValidation.run(run.id, run.conclusion, `https://github.com/${repository}/actions/runs/${run.id}`,
         run.head_sha, run.path);
       if (Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0) {
-        recordAttempt.run(run.run_attempt, run.conclusion, delivery, run.id, run.head_sha, run.path);
+        applyCiAttempt(run.run_attempt, run.conclusion, delivery, run.id, run.head_sha, run.path);
         const pulls = run.pull_requests;
         if (run.path === prWorkflow && run.event === 'pull_request'
           && /^[a-f0-9]{40}$/.test(run.head_sha) && Array.isArray(pulls) && pulls.length === 1

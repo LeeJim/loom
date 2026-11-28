@@ -11,7 +11,7 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="./" aria-label="loom 控制台"><span class="brand-icon" aria-hidden="true">⌘</span>loom</a>
-      <nav aria-label="控制台导航"><a href="#flow">编排</a><a href="#jobs">任务</a><a href="#activity">执行记录</a></nav>
+      <nav aria-label="控制台导航"><a href="#flow">编排</a><a href="#jobs">任务</a><a href="#activity">执行记录</a><a href="#workers">Worker</a><a href="#capabilities">能力</a><a href="#audit">审计</a></nav>
       <div class="live"><span class="live-dot" id="live-dot"></span><span id="connection" role="status">连接中</span></div>
     </div>
   </header>
@@ -20,17 +20,41 @@
       <div><h1>工作流控制台</h1><p class="repo">LeeJim / HowToCookOnMiniprogram</p></div>
       <div class="actions"><button id="toggle" type="button" aria-pressed="false">暂停刷新</button><button type="button" class="primary" id="refresh">立即刷新</button></div>
     </div>
+    <div class="actions" id="account" hidden>
+      <span id="user-login"></span><a id="github-login" href="./oauth/login" hidden>使用 GitHub 登录</a>
+      <button id="logout" type="button" hidden>退出登录</button>
+    </div>
     <p id="run-feedback" role="status" hidden></p>
-    <p id="error" role="alert" hidden>无法加载控制台数据，请检查 SSH 隧道后重试。</p>
+    <p id="error" role="alert" hidden>无法加载控制台数据，请登录或稍后重试。</p>
     <section class="metrics" aria-label="运行统计" id="metrics"></section>
     <section id="flow" class="panel">
-      <div class="section-head"><div><h2>Agent 编排</h2><p>任务当前所处阶段</p></div><span id="mode" class="badge">单任务并发</span></div>
+      <div class="section-head"><div><h2>Agent 编排</h2><p>任务当前所处阶段</p></div><span id="mode" class="badge">Worker 调度</span></div>
       <ol id="stages" class="stages"></ol>
       <div class="flow-footer">验证失败时进入 Repair，再返回 Validation。<span id="heartbeat"></span></div>
     </section>
     <section id="jobs" class="panel">
       <div class="section-head table-head"><div><h2>任务队列</h2><p>Issue、执行状态与交付结果</p></div><div class="filters"><input id="search" type="search" autocomplete="off" aria-label="搜索任务" placeholder="搜索 Issue"><select id="filter" aria-label="按阶段筛选"><option value="">全部阶段</option></select></div></div>
       <div class="scroll"><table><thead><tr><th scope="col">Issue</th><th scope="col">阶段</th><th scope="col">执行</th><th scope="col">修复</th><th scope="col">GitHub Actions</th><th scope="col">交付</th><th scope="col">操作</th></tr></thead><tbody id="job-rows"></tbody></table></div>
+    </section>
+    <section id="workers" class="panel">
+      <div class="section-head"><h2>我的 Worker</h2></div>
+      <form id="worker-form" class="filters" hidden>
+        <label>名称 <input name="name" required maxlength="64"></label>
+        <label>Issue <input name="issue" type="number" min="1" step="1" placeholder="所有已配置项"></label>
+        <label>模型 <select name="model"><option value="">默认模型</option></select></label>
+        <label>技能 <select name="skills" multiple></select></label>
+        <button type="submit">创建 Worker</button>
+      </form>
+      <p id="worker-notice" role="status"></p>
+      <div class="list" id="worker-list"></div>
+    </section>
+    <section id="capabilities" class="panel">
+      <div class="section-head"><h2>Agent 能力</h2><button id="refresh-capabilities" type="button">刷新能力</button></div>
+      <div class="list" id="capability-list"></div>
+    </section>
+    <section id="audit" class="panel">
+      <div class="section-head"><h2>执行审计</h2><button id="refresh-audit" type="button">查看审计结果</button></div>
+      <div class="list" id="audit-list"></div>
     </section>
     <div id="activity" class="activity-grid">
       <section class="panel"><div class="section-head"><div><h2>执行记录</h2><p>开启执行记录后的 Worker 运行</p></div></div><div id="executions" class="list"></div></section>

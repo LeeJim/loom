@@ -1,4 +1,6 @@
 """Run approved patch tasks in an isolated workspace."""
+from contextlib import contextmanager
+from contextvars import ContextVar
 import json
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -8,11 +10,28 @@ import re
 import subprocess
 import tempfile
 
+import telemetry
+from capabilities import DEFAULT_MODEL, skill_files
+
 ROOT = Path("/opt/loom")
 NETWORK = "loom-sandbox"
 REPO = "https://github.com/LeeJim/HowToCookOnMiniprogram.git"
 IMAGE = "loom-opencode:1.19.6"
 CONTAINER = "loom-worker-sandbox"
+_agent_scope = ContextVar("agent_scope", default=(None, None, (), None))
+
+
+class PlanBaseChanged(RuntimeError):
+    """The approved base no longer matches the target repository."""
+
+
+@contextmanager
+def agent_context(worker_id, model=None, skills=(), *, issue=None):
+    token = _agent_scope.set((worker_id, model, skills, issue))
+    try:
+        yield
+    finally:
+        _agent_scope.reset(token)
 
 
 def command(*args, cwd=None, timeout=120, env=None):
@@ -22,34 +41,61 @@ def command(*args, cwd=None, timeout=120, env=None):
     ).stdout
 
 
-def agent(work, prompt, edit=False):
+def agent(work, prompt, edit=False, *, stage=None):
+    worker, selected, skills, issue = _agent_scope.get()
+    model = selected or os.environ.get("LOOM_AGENT_DEFAULT_MODEL", DEFAULT_MODEL)
+    if not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,160}", model):
+        raise ValueError("Invalid AgentGateway model identifier")
+    gateway = os.environ.get("LOOM_SANDBOX_GATEWAY_URL", "http://gateway:4000/v1")
+    paths = skill_files(skills)
+    mounts = []
+    scope = CONTAINER
+    if issue is not None or worker is not None:
+        identity = f"issue:{issue}" if issue is not None else f"worker:{worker}"
+        scope += "-" + sha256(identity.encode()).hexdigest()[:16]
+    for index, (_, _, path) in enumerate(paths):
+        mounts.extend(("--mount", f"type=bind,source={path},target=/loom-skill-{index},readonly"))
     config = {
         "provider": {"gateway": {
             "npm": "@ai-sdk/openai-compatible", "name": "AgentGateway",
-            "options": {"baseURL": "http://gateway:4000/v1", "apiKey": "sandbox"},
-            "models": {"deepseek/deepseek-v4-flash": {"name": "DeepSeek V4 Flash"}},
+            "options": {"baseURL": gateway, "apiKey": "sandbox"},
+            "models": {model: {"name": model}},
         }},
+        "enabled_providers": ["gateway"],
+        "instructions": [f"/loom-skill-{index}/SKILL.md" for index in range(len(paths))],
         "permission": {"*": "deny", "read": "allow", "glob": "allow",
                        "grep": "allow", "edit": "allow" if edit else "deny"},
     }
     stale = command(
-        "docker", "ps", "-aq", "--filter", f"name=^{CONTAINER}$",
+        "docker", "ps", "-aq", "--filter", f"name=^{scope}$",
         "--filter", "label=loom.role=workflow-worker",
     ).strip()
     if stale:
         command("docker", "rm", "-f", stale, timeout=20)
-    return command(
-        "docker", "run", "--rm", "--name", CONTAINER,
-        "--label", "loom.role=workflow-worker",
-        "--network", NETWORK, "--cap-drop", "ALL",
-        "--security-opt", "no-new-privileges", "--read-only", "--tmpfs",
-        "/tmp:rw,nosuid,nodev,size=128m", "--memory", "512m", "--cpus", "1",
-        "--pids-limit", "128", "--mount",
-        f"type=bind,source={work},target=/work" + ("" if edit else ",readonly"),
-        "-e", f"OPENCODE_CONFIG_CONTENT={json.dumps(config)}", IMAGE,
-        "run", "--model", "gateway/deepseek/deepseek-v4-flash", prompt,
-        timeout=240,
-    )
+    step = stage or ("Coding" if edit else "Planning")
+    telemetry.record(step, "input", prompt=prompt, model=model, gateway=True,
+                     skills=[{"id": name, "version": version} for name, version, _ in paths])
+    try:
+        result = command(
+            "docker", "run", "--rm", "--name", scope,
+            "--label", "loom.role=workflow-worker",
+            "--network", NETWORK, "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges", "--read-only", "--tmpfs",
+            "/tmp:rw,nosuid,nodev,size=128m", "--memory", "512m", "--cpus", "1",
+            "--pids-limit", "128", "--mount",
+            f"type=bind,source={work},target=/work" + ("" if edit else ",readonly"),
+            *mounts, "-e", f"OPENCODE_CONFIG_CONTENT={json.dumps(config)}", IMAGE,
+            "run", "--model", f"gateway/{model}", prompt,
+            timeout=240,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        telemetry.record(step, "output", result="error", error=type(error).__name__)
+        raise
+    if not result.strip():
+        telemetry.record(step, "output", result="error", error="Empty agent response")
+        raise RuntimeError("AgentGateway-backed invocation returned no output")
+    telemetry.record(step, "output", response=result)
+    return result
 
 
 def validate(base, work):
@@ -166,7 +212,7 @@ def run(db, number, *, files=None, repository=REPO, ci_failure=None, output=None
             base = temp / "base"
             command("git", "clone", "--depth", "1", "--no-tags", repository, str(base))
             if expected_base and command("git", "rev-parse", "HEAD", cwd=base).strip() != expected_base:
-                raise ValueError("Approved plan no longer matches the base commit")
+                raise PlanBaseChanged("Approved plan no longer matches the base commit")
             names = files or ("README.md",)
             for name in names:
                 destination = work / name
@@ -186,13 +232,13 @@ def run(db, number, *, files=None, repository=REPO, ci_failure=None, output=None
                 for name in names:
                     os.chown(source(work, name), 1000, 1000)
                 agent(work, "Repair this existing patch after the registered CI failure at "
-                      + ci_failure + ". Review the issue acceptance criteria before editing.\n" + request, edit=True)
+                      + ci_failure + ". Review the issue acceptance criteria before editing.\n" + request, edit=True, stage="Repair")
             else:
                 plan = approved_plan or agent(work, "Read the approved files and propose an implementation plan.\n" + request)
                 stage("Coding")
                 agent(work, "Implement the requested change.\n" + request + "\nPlan:\n" + plan, edit=True)
 
-            def validate_patch():
+            def build_validated_patch():
                 if files:
                     patch = code_patch(base, work, names)
                     if number == 15 and names == ("miniprogram/utils/index.js",):
@@ -201,6 +247,18 @@ def run(db, number, *, files=None, repository=REPO, ci_failure=None, output=None
                 if not validate(base, work):
                     raise ValueError("README validation failed")
                 return file_patch(base, work, "README.md")
+
+            def validate_patch():
+                telemetry.record("Validation", "input", files=names)
+                try:
+                    patch = build_validated_patch()
+                except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                    telemetry.record("Validation", "output", result="failed",
+                                     error=str(error) if isinstance(error, ValueError) else type(error).__name__)
+                    raise
+                telemetry.record("Validation", "output", result="passed",
+                                 patch_sha256=sha256(patch.encode()).hexdigest())
+                return patch
 
             repairs = int(bool(ci_failure))
             stage("Validation", repairs)
@@ -213,10 +271,11 @@ def run(db, number, *, files=None, repository=REPO, ci_failure=None, output=None
                 stage("Repair", repairs)
                 criteria = ("Keep the approved file scope, fix JavaScript syntax, and satisfy the issue."
                             if files else "Include both version commands and keep the README concise.")
-                agent(work, "Validation failed. " + criteria + "\n" + request, edit=True)
+                agent(work, "Validation failed. " + criteria + "\n" + request, edit=True, stage="Repair")
                 stage("Validation", repairs)
                 patch = validate_patch()
             stage("Review", repairs)
+            telemetry.record("Review", "input", patch=patch)
             if ci_failure and patch == original_patch.read_text():
                 raise ValueError("CI repair produced no change to the delivered patch")
             subprocess.run(
@@ -227,7 +286,9 @@ def run(db, number, *, files=None, repository=REPO, ci_failure=None, output=None
                 updated = (work / "README.md").read_text()
                 if not all(line in updated for line in (base / "README.md").read_text().splitlines() if line.strip()):
                     raise RuntimeError("README review rejected removal of existing content")
+            telemetry.record("Review", "output", result="passed")
             output = output or ROOT / "data" / f"issue-{number}.patch"
+            telemetry.record("Delivery", "input", patch_sha256=sha256(patch.encode()).hexdigest())
             temporary = output.with_suffix(".tmp")
             temporary.write_text(patch)
             temporary.replace(output)
@@ -240,7 +301,12 @@ def run(db, number, *, files=None, repository=REPO, ci_failure=None, output=None
                 }))
                 temporary.replace(metadata)
             stage("Delivery", repairs)
+            telemetry.record("Delivery", "output", artifact=output.name, bytes=len(patch.encode()))
+    except PlanBaseChanged:
+        telemetry.record("Planning", "output", result="stale", error="Approved base changed")
+        raise
     except Exception as error:
         current = db.execute("SELECT stage, repair_count FROM jobs WHERE number=?", (number,)).fetchone()
         stage(current[0], current[1], type(error).__name__)
+        telemetry.record(current[0], "output", result="failed", error=type(error).__name__)
         raise RuntimeError(f"Workflow stopped during {current[0]}") from None
