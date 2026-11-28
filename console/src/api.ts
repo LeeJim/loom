@@ -2,7 +2,7 @@ export type Job = {
   number: number; title: string; stage: string; last_error: string | null;
   repair_count: number; executions: number; pr_number: number | null; run_id: number | null;
   plan_comment_url: string | null; ci_conclusion: string | null; manual_allowed: number;
-  manual_status: string | null; publication_status: string | null; publish_approved: number;
+  manual_status: string | null; publication_status: string | null;
   plan_state: string | null; plan_error: string | null; publication_error: string | null;
 };
 export type Execution = {

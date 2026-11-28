@@ -26,7 +26,7 @@ class RetryTests(unittest.TestCase):
         CREATE TABLE jobs(number INTEGER PRIMARY KEY,stage TEXT,last_error TEXT,repair_count INTEGER);
         CREATE TABLE manual_runs(issue_number INTEGER PRIMARY KEY,status TEXT);
         CREATE TABLE pr_deliveries(issue_number INTEGER);
-        CREATE TABLE publications(issue_number INTEGER);
+        CREATE TABLE publications(issue_number INTEGER,status TEXT,error TEXT);
         CREATE TABLE publication_approvals(issue_number INTEGER,approved INTEGER);
         INSERT INTO jobs VALUES(15,'Planning',NULL,0);
         INSERT INTO issue_plans(issue_number,plan_id,title,body,profile,base_sha,plan)

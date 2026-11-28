@@ -1,4 +1,4 @@
-import { ActivityFailure, ApplicationFailure, condition, defineQuery, defineSignal, proxyActivities, setHandler } from "@temporalio/workflow";
+import { ActivityFailure, ApplicationFailure, condition, defineQuery, defineSignal, patched, proxyActivities, setHandler } from "@temporalio/workflow";
 import type { Activities, Artifact, CiResult, Directive, Draft, Issue, Plan } from "./contracts.js";
 
 export const directive = defineSignal<[Directive]>("loom.directive");
@@ -90,15 +90,22 @@ export async function issueWorkflow(issue: Issue): Promise<{ draft: Draft; ci: C
   }
 
   state.stage = "publication";
-  await condition(() => publishGeneration > 0);
-  for (;;) {
-    const seen = publishGeneration;
+  if (patched("publish-approved-plan-by-default")) {
     const draft = await activities.publish(issue, plan, patch);
-    if (draft) {
-      state.draft = draft;
-      break;
+    if (!draft) throw ApplicationFailure.nonRetryable("Issue is closed; draft publication skipped");
+    state.draft = draft;
+  } else {
+    // Preserve the recorded command order for executions started by the older workflow.
+    await condition(() => publishGeneration > 0);
+    for (;;) {
+      const seen = publishGeneration;
+      const draft = await activities.publish(issue, plan, patch);
+      if (draft) {
+        state.draft = draft;
+        break;
+      }
+      await condition(() => publishGeneration !== seen);
     }
-    await condition(() => publishGeneration !== seen);
   }
   const draft = state.draft;
   state.stage = "ci";

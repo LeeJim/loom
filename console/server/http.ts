@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { capabilities, ModelCatalogUnavailable, ModelUnavailable } from "./capabilities.js";
 import {
   audit, createWorker, defaultDb, InvalidRequest, positiveInt, queueRun, setWorkerState,
-  snapshot, systemWorker, temporalActivities, timeline, validateWorker, withDb, workers,
+  snapshot, systemWorker, temporalActivities, timeline, validateWorker, withDb, workflowDetail, workers,
 } from "./data.js";
 import { logFilters, recentLogs } from "./logs.js";
 import { canReviewRsi, listRsi, reviewRsi } from "./rsi.js";
@@ -82,6 +82,23 @@ export function consoleServer({
       if (path.startsWith("/api/")) {
         if (!user && (!local || path.startsWith("/api/workers"))) return fail(401, "login_required");
         if (get && path === "/api/snapshot") {
+          if (url.searchParams.get("view") === "workflow") {
+            const issue = url.searchParams.get("issue");
+            const before = url.searchParams.get("before");
+            if (!issue || !/^[1-9]\d{0,14}$/.test(issue) ||
+                (before !== null && !/^[1-9]\d{0,14}$/.test(before))) throw new InvalidRequest();
+            const number = Number(issue);
+            const result = withDb(database, true, db => workflowDetail(db, number, before === null ? null : Number(before)));
+            let temporal: ReturnType<typeof temporalActivities>["activities"] = [];
+            let temporalUnavailable = false;
+            if (temporalDb) {
+              try { temporal = temporalActivities(temporalDb, number).activities; }
+              catch { temporalUnavailable = true; }
+            }
+            return result || temporal.length
+              ? json(200, { job: null, executions: [], nextBefore: null, ...result, temporal, temporalUnavailable })
+              : fail(404, "not_found");
+          }
           if (url.searchParams.get("view") === "default-worker") {
             return json(200, withDb(database, true, systemWorker));
           }
@@ -136,7 +153,7 @@ export function consoleServer({
         const result = withDb(database, false, db => setWorkerState(db, user!.id, input.id, input.state));
         return result ? json(200, result) : fail(404, "not_found");
       }
-      if (get && (fallbackRoutes.has(path) || /^\/executions\/[1-9]\d{0,14}$/.test(path))) {
+      if (get && (fallbackRoutes.has(path) || /^\/(?:executions|tasks)\/[1-9]\d{0,14}$/.test(path))) {
         return send(200, await readFile(join(staticRoot, "index.html")), "text/html; charset=utf-8");
       }
       if (get && /^\/assets\/[\w.-]+\.(?:js|css)$/.test(path)) {

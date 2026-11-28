@@ -72,7 +72,7 @@ export function Tasks() {
         <div className="table-scroll"><table><thead><tr>
           <th>Issue</th><th>阶段</th><th>执行</th><th>CI</th><th>交付</th><th>操作</th>
         </tr></thead><tbody>{jobs.map(row => <tr key={row.number}>
-          <td><a className="text-link" href={repository + "/issues/" + row.number}>#{row.number} {row.title}</a>
+          <td><Link className="text-link" to={`/tasks/${row.number}`}>#{row.number} {row.title}</Link>
             {(row.plan_comment_url || row.last_error || row.plan_error) && <small className="table-meta">
               {row.plan_comment_url?.startsWith(repository + "/issues/") && <a href={row.plan_comment_url}>查看方案</a>}
               {row.last_error || row.plan_error}
@@ -82,10 +82,10 @@ export function Tasks() {
             <small className="table-meta">修复 {row.repair_count} 次</small></td>
           <td>{row.run_id ? <a href={repository + "/actions/runs/" + row.run_id}><Badge value={row.ci_conclusion} /></a> : "—"}</td>
           <td>{row.pr_number ? <a className="text-link" href={repository + "/pull/" + row.pr_number}>PR #{row.pr_number}</a>
-            : <Badge value={row.publication_status || (row.publish_approved ? "已授权" : null)} />}
+            : <Badge value={row.publication_status || (row.stage === "Delivery" && row.plan_state === "approved" ? "待自动发布" : null)} />}
             {row.publication_error && <small className="table-meta">{row.publication_error}</small>}</td>
           <td>{Boolean(row.manual_allowed && session?.user) && <button className="button small" disabled={pending !== undefined}
-            onClick={() => run(row.number)}>{pending === row.number ? "提交中" : "运行"}</button>}</td>
+            onClick={() => run(row.number)}>{pending === row.number ? "提交中" : row.publication_status === "failed" ? (row.publication_error?.startsWith("replan: ") ? "重新规划" : "重试发布") : row.stage === "Stopped" ? "恢复" : "运行"}</button>}</td>
         </tr>)}</tbody></table></div>}
     </Panel>
   </Page>;

@@ -6,7 +6,7 @@ import { Badge, Empty, Page, Panel, ReadState, Refresh, time, useResource } from
 
 type SystemWorker = {
   model: string | null; poolLimit: number | null;
-  profiles: { issue: number; files: string[] | null }[]; staticPublication: number[] | null;
+  profiles: { issue: number; files: string[] | null }[];
   activeIssue: number | null; heartbeat: string | null;
   status: "running" | "delegated" | "unconfigured" | "unavailable";
 };
@@ -25,8 +25,7 @@ function DefaultWorker() {
       <li><span>任务范围</span><strong>{data.profiles.length ? data.profiles.map(item => `#${item.issue}`).join("、") : "未配置"}</strong></li>
       {data.profiles.filter(item => item.files !== null).map(item =>
         <li key={item.issue}><span>Issue #{item.issue} · 允许修改文件</span><span>{item.files?.join("、")}</span></li>)}
-      {data.staticPublication !== null && <li><span>预授权发布</span><span>{data.staticPublication.length
-        ? data.staticPublication.map(issue => `#${issue}`).join("、") : "无预授权 Issue"}</span></li>}
+      <li><span>发布策略</span><span>方案获批且验证通过后自动创建草稿 PR</span></li>
     </ul>}
   </Panel>;
 }

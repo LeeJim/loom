@@ -120,3 +120,14 @@ After approval, requeue a stopped plan through Console. The Worker keeps the
 saved plan and searches for the original comment marker before attempting to
 post again. Temporary failures retry with a bounded delay. The execution
 record shows sanitized status, reason, and GitHub request ID when available.
+
+## Draft publication and recovery
+
+After the current plan is approved and its patch passes validation and review,
+the Worker automatically creates a draft PR. Issue access, current approval,
+patch digest, base and approved files are checked before publishing.
+
+The Console task detail shows stage durations and execution inputs and outputs.
+An authorized GitHub user can resume a stopped plan, request a new plan after
+a coding failure or retry a failed publication when eligible. Publication retry
+reuses the approved plan and validated patch.

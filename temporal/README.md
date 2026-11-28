@@ -45,8 +45,8 @@ authorization, and CI matching. It uses transient test persistence.
 5. Queue an existing configured Issue with
    `npm run pilot:start -- <Issue number>`, or deliver a signed opened event
    for a configured Issue. Iterate with `@loom <feedback>`, then approve
-   the current version with `@loom 通过`. Apply `loom:publish` as a
-   repository collaborator when ready to publish. The pilot CI receiver
+   the current version with `@loom 通过`. A validated change proceeds to
+   draft PR publication while the Issue is open. The pilot CI receiver
    accepts the configured Loom PR validation workflow and checks the PR
    number and commit against its draft receipt.
 6. To display Activity inputs, outputs, and retry attempts in the existing

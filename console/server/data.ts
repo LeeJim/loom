@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { snapshotQueries } from "./queries.js";
+import { manualEligible, snapshotQueries } from "./queries.js";
 import { availableModel, installedSkill } from "./capabilities.js";
 
 export const defaultDb = "/opt/loom/data/workflow.sqlite";
@@ -45,12 +45,35 @@ export function timeline(db: DatabaseSync, id: number) {
   };
 }
 
-export function temporalActivities(path?: string) {
+export function workflowDetail(db: DatabaseSync, issue: number, before: number | null) {
+  db.exec("BEGIN");
+  const job = db.prepare(`
+    SELECT j.number,j.title,j.stage,j.last_error,pr.pr_url,
+      manual.status AS manual_status,p.status AS publication_status,p.error AS publication_error,
+      plan.plan_id,plan.state AS plan_state,plan.error AS plan_error,plan.comment_url,
+      (${manualEligible}) AS manual_allowed
+    FROM jobs j
+    LEFT JOIN pr_deliveries pr ON pr.issue_number=j.number
+    LEFT JOIN publications p ON p.issue_number=j.number
+    LEFT JOIN worker_profiles profile ON profile.issue_number=j.number
+    LEFT JOIN manual_runs manual ON manual.issue_number=j.number
+    LEFT JOIN issue_plans plan ON plan.issue_number=j.number
+    WHERE j.number=?
+  `).get(issue);
+  if (!job) return;
+  const runs = db.prepare(`SELECT id FROM workflow_executions
+    WHERE issue_number=? AND (? IS NULL OR id<?) ORDER BY id DESC LIMIT 13`).all(issue, before, before);
+  const page = runs.slice(0, 12);
+  return { job, executions: page.map(row => timeline(db, Number(row.id))),
+    nextBefore: runs.length > 12 ? Number(page.at(-1)?.id) : null };
+}
+
+export function temporalActivities(path?: string, issue: number | null = null) {
   if (!path) return { enabled: false, activities: [] };
   return withDb(path, true, db => ({ enabled: true, activities: db.prepare(`
     SELECT id,workflow_id,issue_number,activity,attempt,status,inputs,output,started_at,finished_at
-    FROM temporal_activity_records ORDER BY id DESC LIMIT 60
-  `).all().map(row => ({ ...row, inputs: JSON.parse(String(row.inputs)),
+    FROM temporal_activity_records WHERE (? IS NULL OR issue_number=?) ORDER BY id DESC LIMIT 60
+  `).all(issue, issue).map(row => ({ ...row, inputs: JSON.parse(String(row.inputs)),
     output: row.output === null ? null : JSON.parse(String(row.output)) })) }));
 }
 
@@ -170,14 +193,13 @@ export function queueRun(db: DatabaseSync, issue: number, actor: number) {
   return write(db, () => {
     const queued = db.prepare(`
     INSERT INTO manual_runs(issue_number,status)
-    SELECT j.number,'queued' FROM jobs j JOIN worker_profiles p ON p.issue_number=j.number
-    WHERE j.number=? AND NOT EXISTS (SELECT 1 FROM pr_deliveries WHERE issue_number=j.number)
-      AND NOT EXISTS (SELECT 1 FROM publications WHERE issue_number=j.number)
-      AND NOT EXISTS (SELECT 1 FROM publication_approvals WHERE issue_number=j.number AND approved=1)
-      AND (j.stage!='AwaitingApproval' OR EXISTS
-        (SELECT 1 FROM issue_plans WHERE issue_number=j.number AND error IS NOT NULL))
-      AND NOT EXISTS (SELECT 1 FROM workflow_executions WHERE issue_number=j.number AND status='running')
-      AND NOT EXISTS (SELECT 1 FROM loom_issue_claims WHERE issue_number=j.number)
+    SELECT j.number,'queued' FROM jobs j
+    JOIN worker_profiles profile ON profile.issue_number=j.number
+    LEFT JOIN pr_deliveries pr ON pr.issue_number=j.number
+    LEFT JOIN publications p ON p.issue_number=j.number
+    LEFT JOIN manual_runs manual ON manual.issue_number=j.number
+    LEFT JOIN issue_plans plan ON plan.issue_number=j.number
+    WHERE j.number=? AND (${manualEligible})
     ON CONFLICT(issue_number) DO UPDATE SET status='queued',requested_at=CURRENT_TIMESTAMP
       WHERE manual_runs.status NOT IN ('queued','running','awaiting_plan')
     `).run(issue).changes > 0;
