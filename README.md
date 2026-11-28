@@ -64,6 +64,10 @@ flowchart LR
 
 Controller 接收签名 Webhook，并轮询已配置的 GitHub Issue。Worker 管理进程在同一主机上并行调度实例。各实例通过 SQLite 独占领取 Issue，使用独立沙箱执行，并将 OpenCode 的模型请求交由 AgentGateway 转发。方案评论与草稿 PR 通过 GitHub App 发布。
 
+## Temporal 试点
+
+TypeScript 试点通过 Temporal 编排方案审批、沙箱执行和交付。在隔离环境运行和验收的步骤见 [试点说明](temporal/README.md)。
+
 ## 部署
 
 生产部署由 GitHub Actions 在变更合并到 `main` 后触发。首次配置见[部署流水线说明](deploy/README.md)。

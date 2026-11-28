@@ -235,6 +235,28 @@ async function showArtifacts(executionId, target) {
   if (!record.artifacts.length) target.append(element('p', '暂无阶段输入与输出。'));
 }
 
+async function loadTemporalActivities() {
+  const panel = get('temporal-activity');
+  const list = get('temporal-activity-list');
+  try {
+    const {enabled, activities} = await request('temporal/activities');
+    panel.hidden = !enabled;
+    if (!enabled) return;
+    const rows = activities.map((record) => {
+      const row = element('details', null, 'item');
+      row.append(element('summary', '#' + record.issue_number + ' · ' + record.activity +
+        ' · ' + record.status + ' · 第 ' + record.attempt + ' 次'),
+        element('p', timestamp(record.started_at)),
+        element('pre', JSON.stringify({输入: record.inputs, 输出: record.output}, null, 2), 'artifact'));
+      return row;
+    });
+    list.replaceChildren(...rows);
+    if (!rows.length) list.textContent = '暂无试点执行记录。';
+  } catch {
+    if (!panel.hidden) list.textContent = '暂时无法加载试点执行记录。';
+  }
+}
+
 function render() {
   const m = data.metrics;
   const cards = [
@@ -343,6 +365,9 @@ async function refresh() {
     if (!response.ok) throw new Error('Console data unavailable');
     data = await response.json();
     render();
+    if (get('temporal-activity').hidden || !document.querySelector('#temporal-activity details[open]')) {
+      loadTemporalActivities();
+    }
     get('error').hidden = true;
     get('live-dot').className = 'live-dot online';
     get('connection').textContent = paused ? '自动刷新已暂停' : '实时刷新';
