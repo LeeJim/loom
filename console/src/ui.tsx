@@ -4,7 +4,7 @@ import { api, ApiError } from "./api";
 
 export const labels: Record<string, string> = {
   Planning: "规划", AwaitingApproval: "待审批", Coding: "编码", Validation: "验证",
-  Repair: "修复", Review: "评审", Delivery: "交付", CI: "CI",
+  Repair: "修复", Review: "评审", Delivery: "交付", Stopped: "已中止", CI: "CI",
   running: "运行中", paused: "已暂停", draining: "排空中", queued: "已排队", completed: "已完成",
   failed: "失败", success: "通过", failure: "失败", candidate: "候选", interrupted: "已中断",
   awaiting_plan: "等待方案", rejected: "已拒绝", published: "已发布", available: "可用",

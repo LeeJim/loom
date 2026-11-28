@@ -108,3 +108,15 @@ LOOM_DB=/absolute/path/to/workflow.sqlite npm start --prefix console
 Open `http://127.0.0.1:8790/console/`. The same build also works through
 Caddy's existing `handle_path /console/*` route. Worker management uses
 the configured GitHub OAuth credentials.
+
+## GitHub App permissions for plan comments
+
+Grant **Issues: Read and write** to the App installed on the target repository
+and approve the updated installation permissions. Loom requests a separate
+repository-scoped Issues token when it posts a plan. Existing pull request and
+contents token permissions are used for delivery as before.
+
+After approval, requeue a stopped plan through Console. The Worker keeps the
+saved plan and searches for the original comment marker before attempting to
+post again. Temporary failures retry with a bounded delay. The execution
+record shows sanitized status, reason, and GitHub request ID when available.

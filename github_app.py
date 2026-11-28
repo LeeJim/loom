@@ -13,6 +13,11 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 REPOSITORY = "LeeJim/HowToCookOnMiniprogram"
 DEFAULT_CONFIG = Path("/opt/loom/secrets/github-app.json")
 PERMISSIONS = {"contents": "write", "pull_requests": "write"}
+ISSUE_COMMENT_PERMISSIONS = {"issues": "write"}
+
+
+class MissingIssueWritePermission(ValueError):
+    pass
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -53,7 +58,7 @@ def app_jwt(app_id, key_path):
     return (message + b"." + encode(signed.stdout)).decode("ascii")
 
 
-def installation_token(config_path):
+def installation_token(config_path, *, permissions=PERMISSIONS):
     config = json.loads(Path(config_path).read_text())
     app_id = str(config["app_id"])
     if not re.fullmatch(r"[1-9][0-9]*", app_id):
@@ -63,14 +68,16 @@ def installation_token(config_path):
         raise ValueError("GitHub App private key path must be absolute")
     jwt = app_jwt(app_id, key_path)
     installation = api(jwt, f"/repos/{REPOSITORY}/installation")
+    if permissions == ISSUE_COMMENT_PERMISSIONS and installation.get("permissions", {}).get("issues") != "write":
+        raise MissingIssueWritePermission("GitHub App installation requires Issues: write")
     installation_id = installation["id"]
     if type(installation_id) is not int or installation_id <= 0:
         raise ValueError("Invalid GitHub App installation")
     result = api(jwt, f"/app/installations/{installation_id}/access_tokens", body={
-        "repositories": [REPOSITORY.split("/", 1)[1]], "permissions": PERMISSIONS,
+        "repositories": [REPOSITORY.split("/", 1)[1]], "permissions": permissions,
     })
-    if any(result["permissions"].get(name) != access for name, access in PERMISSIONS.items()):
-        raise ValueError("Missing GitHub App publishing permissions")
+    if any(result["permissions"].get(name) != access for name, access in permissions.items()):
+        raise ValueError("Missing requested GitHub App permissions")
     token = result["token"]
     if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", token):
         raise ValueError("Unexpected GitHub installation token format")

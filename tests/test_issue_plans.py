@@ -80,3 +80,27 @@ class IssuePlanTests(unittest.TestCase):
         self.assertIsNone(self.review())
         self.assertIsNone(self.db.execute("SELECT 1 FROM issue_plans").fetchone())
         self.assertEqual(self.db.execute("SELECT stage FROM jobs").fetchone(), ("Planning",))
+
+    def test_post_uses_issue_token_and_existing_receipt_does_not_mint_it(self):
+        self.db.execute("UPDATE issue_plans SET state='posting',posted_at=NULL,comment_url=NULL")
+        posted = comment(21, "<!-- loom-plan:v1 -->")
+        posted["user"]["login"] = plans.BOT
+        posted["html_url"] = "https://example.org/#issuecomment-21"
+        calls = []
+
+        def github(token, path, *, body=None):
+            if body is not None:
+                self.assertEqual(token, "write")
+                self.assertIn("<!-- loom-plan:v1 -->", body["body"])
+                calls.append(path)
+                return posted
+            return self.github(token, path)
+
+        with patch.object(plans, "installation_token", side_effect=["read", "write", "read"]) as token:
+            with patch.object(plans, "api", github):
+                self.assertIsNone(plans.review(self.db, 1, ("README.md",), None))
+                self.db.execute("UPDATE issue_plans SET state='posting',next_check=0")
+                self.comments = [posted]
+                self.assertIsNone(plans.review(self.db, 1, ("README.md",), None))
+            self.assertEqual(token.call_args_list[1].kwargs, {"permissions": plans.ISSUE_COMMENT_PERMISSIONS})
+        self.assertEqual(len(calls), 1)

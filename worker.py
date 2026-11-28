@@ -17,6 +17,7 @@ from publish import publish
 from github_app import DEFAULT_CONFIG
 import telemetry
 import plans
+import plan_retries
 import worker_registry
 
 
@@ -26,31 +27,27 @@ def run_next(db, handlers, allowed_files, app_config):
         row = db.execute(
             "SELECT stage, last_error FROM jobs WHERE number=?", (number,)
         ).fetchone()
-        if row is None or row[0] == "Delivery" or row[1] is not None:
+        if row is None or row[0] in {"Delivery", "Stopped"} or row[1] is not None:
             continue
         pending = db.execute(
             "SELECT next_check FROM issue_plans WHERE issue_number=?", (number,)
         ).fetchone()
-        if pending and pending[0] > int(time.time()):
+        if (pending and pending[0] > int(time.time())) or not plan_retries.eligible(db, number):
             continue
         review = telemetry.start(db, number, "plan_review")
         try:
             with telemetry.capture(db, review):
                 approval = plans.review(db, number, allowed_files[number], app_config)
         except Exception as error:
-            telemetry.finish(db, review, "failed", type(error).__name__)
-            with db:
-                status = db.execute("SELECT 1 FROM issue_plans WHERE issue_number=?", (number,)).fetchone()
-                if status:
-                    db.execute("UPDATE issue_plans SET error=?,next_check=? WHERE issue_number=?",
-                               (type(error).__name__, int(time.time()) + 60, number))
-                else:
-                    db.execute("UPDATE jobs SET last_error=? WHERE number=?", (type(error).__name__, number))
-                    db.execute("UPDATE manual_runs SET status='failed' WHERE issue_number=? AND status='awaiting_plan'",
-                               (number,))
-            print(f"Issue #{number}: plan check failed ({type(error).__name__})", flush=True)
+            retry = plan_retries.record_failure(db, number, error)
+            with telemetry.capture(db, review):
+                telemetry.record("Planning", "output", result="failed", **retry)
+            telemetry.finish(db, review, "failed", retry["reason"])
+            print(f"Issue #{number}: {retry['operation']} {retry['state']} ({retry['reason']})", flush=True)
             continue
         with db:
+            plan_retries.clear(db, number)
+            db.execute("UPDATE issue_plans SET error=NULL WHERE issue_number=?", (number,))
             activity = db.execute("SELECT 1 FROM workflow_artifacts WHERE execution_id=?", (review,)).fetchone()
             if activity or approval is not None:
                 telemetry.finish(db, review, "completed")
@@ -190,8 +187,17 @@ def run_manual(db, handlers):
         db.execute("UPDATE manual_runs SET status=? WHERE issue_number=?",
                    ("awaiting_plan" if accepted else "rejected", number))
         if accepted:
-            db.execute("DELETE FROM issue_plans WHERE issue_number=?", (number,))
-            db.execute("UPDATE jobs SET stage='Planning', last_error=NULL, repair_count=0 WHERE number=?", (number,))
+            stopped = db.execute("SELECT stage FROM jobs WHERE number=?", (number,)).fetchone() == ("Stopped",)
+            plan = db.execute("SELECT state FROM issue_plans WHERE issue_number=?", (number,)).fetchone()
+            stage = "Planning"
+            if stopped and plan:
+                db.execute("UPDATE issue_plans SET error=NULL,next_check=0 WHERE issue_number=?", (number,))
+                if plan[0] in {"awaiting_review", "approved"}:
+                    stage = "AwaitingApproval"
+            else:
+                db.execute("DELETE FROM issue_plans WHERE issue_number=?", (number,))
+            plan_retries.clear(db, number)
+            db.execute("UPDATE jobs SET stage=?,last_error=NULL,repair_count=0 WHERE number=?", (stage, number))
     return True
 
 
@@ -235,6 +241,7 @@ def main():
             )""")
             telemetry.initialize(db)
             db.executescript(plans.SCHEMA)
+            db.execute(plan_retries.SCHEMA)
             db.execute("""CREATE TABLE IF NOT EXISTS manual_runs (
                 issue_number INTEGER PRIMARY KEY REFERENCES jobs(number),
                 requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, status TEXT NOT NULL
