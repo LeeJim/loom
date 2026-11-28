@@ -1,4 +1,16 @@
 // Read models shared with the existing Loom SQLite schema.
+export const manualEligible = `
+  pr.issue_number IS NULL AND profile.issue_number IS NOT NULL
+  AND COALESCE(manual.status,'') NOT IN ('queued','running','awaiting_plan')
+  AND NOT EXISTS (SELECT 1 FROM workflow_executions running
+                  WHERE running.issue_number=j.number AND running.status='running')
+  AND (
+    (p.issue_number IS NULL AND (j.stage!='AwaitingApproval' OR plan.error IS NOT NULL))
+    OR (p.status='failed' AND j.stage='Delivery' AND j.last_error IS NULL
+        AND plan.state='approved' AND plan.approval_comment_id IS NOT NULL)
+  )
+`;
+
 export const snapshotQueries = {
   metrics: `SELECT (SELECT COUNT(*) FROM jobs) AS issues,
                 (SELECT COUNT(*) FROM jobs WHERE stage='Delivery') AS delivered,
@@ -11,19 +23,13 @@ export const snapshotQueries = {
   stages: `SELECT stage, COUNT(*) AS count FROM jobs GROUP BY stage`,
   jobs: `SELECT j.number, j.title, j.stage, j.repair_count, j.last_error,
                        pr.pr_number, p.status AS publication_status, p.error AS publication_error,
-                       COALESCE(pa.approved,0) AS publish_approved, manual.status AS manual_status,
-                       plan.comment_url AS plan_comment_url, plan.state AS plan_state, plan.error AS plan_error,
-                       (profile.issue_number IS NOT NULL AND pr.pr_number IS NULL
-                        AND p.issue_number IS NULL AND COALESCE(pa.approved,0)=0
-                        AND COALESCE(manual.status,'') NOT IN ('queued','running','awaiting_plan')
-                        AND (j.stage!='AwaitingApproval' OR plan.error IS NOT NULL)
-                        AND NOT EXISTS (SELECT 1 FROM workflow_executions e
-                                       WHERE e.issue_number=j.number AND e.status='running')) AS manual_allowed,
+                       manual.status AS manual_status, plan.comment_url AS plan_comment_url,
+                       plan.state AS plan_state, plan.error AS plan_error,
+                       (${manualEligible}) AS manual_allowed,
                        (SELECT COUNT(*) FROM workflow_executions e WHERE e.issue_number=j.number) AS executions,
                        ci.run_id, COALESCE(a.conclusion,ci.conclusion) AS ci_conclusion, a.attempt
                 FROM jobs j LEFT JOIN pr_deliveries pr ON pr.issue_number=j.number
                 LEFT JOIN publications p ON p.issue_number=j.number
-                LEFT JOIN publication_approvals pa ON pa.issue_number=j.number
                 LEFT JOIN worker_profiles profile ON profile.issue_number=j.number
                 LEFT JOIN manual_runs manual ON manual.issue_number=j.number
                 LEFT JOIN issue_plans plan ON plan.issue_number=j.number

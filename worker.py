@@ -13,7 +13,7 @@ from threading import Event
 import time
 
 from run_docs import ROOT, PlanBaseChanged, agent_context, check_paths, default_model, run
-from publish import publish
+from publish import PublicationBlocked, PublicationNeedsPlan, publish
 from github_app import DEFAULT_CONFIG
 import telemetry
 import plans
@@ -135,15 +135,16 @@ def run_ci_repair(db, handlers, data):
     return True
 
 
-def run_publication(db, files, data, app_config, label_only):
+def run_publication(db, files, data, app_config):
     for number, paths in files.items():
         row = db.execute("""
-            SELECT jobs.stage, pr.pr_number, publication.status FROM jobs
+            SELECT jobs.stage, pr.pr_number, publication.status, plan.state, plan.approval_comment_id FROM jobs
             LEFT JOIN pr_deliveries AS pr ON pr.issue_number=jobs.number
             LEFT JOIN publications AS publication ON publication.issue_number=jobs.number
-            WHERE jobs.number=?
+            LEFT JOIN issue_plans AS plan ON plan.issue_number=jobs.number
+            WHERE jobs.number=? AND jobs.last_error IS NULL
         """, (number,)).fetchone()
-        if row is None or row[0] != "Delivery" or row[1] is not None or row[2] == "failed":
+        if row is None or row[0] != "Delivery" or row[1] is not None or row[2] == "failed" or row[3] != "approved" or not row[4]:
             continue
         with db:
             db.execute("INSERT OR IGNORE INTO publications VALUES (?, 'running', NULL)", (number,))
@@ -152,16 +153,20 @@ def run_publication(db, files, data, app_config, label_only):
             with telemetry.capture(db, execution):
                 telemetry.mark(db, execution, "Publication")
                 telemetry.record("Publication", "input", issue_number=number, approved_files=paths)
-                publish(db, number, data, paths, app_config, require_label=number in label_only)
+                publish(db, number, data, paths, app_config)
                 delivery = db.execute(
                     "SELECT pr_number,pr_url,head_sha FROM pr_deliveries WHERE issue_number=?", (number,)
                 ).fetchone()
                 telemetry.record("Publication", "output", pull_request=delivery)
         except Exception as error:
-            telemetry.finish(db, execution, "failed", type(error).__name__)
+            reason = str(error) if isinstance(error, PublicationBlocked) else type(error).__name__
+            if isinstance(error, PublicationNeedsPlan):
+                reason = "replan: " + reason
+            with telemetry.capture(db, execution):
+                telemetry.record("Publication", "output", result="failed", error=reason)
+            telemetry.finish(db, execution, "failed", reason)
             with db:
-                db.execute("UPDATE publications SET status='failed', error=? WHERE issue_number=?",
-                           (type(error).__name__, number))
+                db.execute("UPDATE publications SET status='failed', error=? WHERE issue_number=?", (reason, number))
             print(f"Issue #{number}: draft publication stopped", flush=True)
         else:
             telemetry.finish(db, execution, "completed")
@@ -178,19 +183,29 @@ def run_manual(db, handlers):
     if queued is None:
         return False
     number = queued[0]
-    blocked = db.execute("""SELECT EXISTS(SELECT 1 FROM pr_deliveries WHERE issue_number=?)
-        OR EXISTS(SELECT 1 FROM publications WHERE issue_number=?)
-        OR EXISTS(SELECT 1 FROM publication_approvals WHERE issue_number=? AND approved=1)""",
-        (number, number, number)).fetchone()[0]
     with db:
+        failed_publication = db.execute("""
+            SELECT p.error FROM publications p JOIN jobs j ON j.number=p.issue_number
+            JOIN issue_plans plan ON plan.issue_number=p.issue_number
+            WHERE p.issue_number=? AND p.status='failed' AND j.stage='Delivery' AND j.last_error IS NULL
+              AND plan.state='approved' AND plan.approval_comment_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM pr_deliveries WHERE issue_number=p.issue_number)
+        """, (number,)).fetchone()
+        if failed_publication:
+            db.execute("DELETE FROM publications WHERE issue_number=? AND status='failed'", (number,))
+            if not (failed_publication[0] or "").startswith("replan: "):
+                db.execute("UPDATE manual_runs SET status='completed' WHERE issue_number=?", (number,))
+                return True
+        blocked = db.execute("""SELECT EXISTS(SELECT 1 FROM pr_deliveries WHERE issue_number=?)
+            OR EXISTS(SELECT 1 FROM publications WHERE issue_number=?)""", (number, number)).fetchone()[0]
         accepted = number in handlers and not blocked
         db.execute("UPDATE manual_runs SET status=? WHERE issue_number=?",
                    ("awaiting_plan" if accepted else "rejected", number))
         if accepted:
             stopped = db.execute("SELECT stage FROM jobs WHERE number=?", (number,)).fetchone() == ("Stopped",)
-            plan = db.execute("SELECT state FROM issue_plans WHERE issue_number=?", (number,)).fetchone()
+            plan = db.execute("SELECT state,error FROM issue_plans WHERE issue_number=?", (number,)).fetchone()
             stage = "Planning"
-            if stopped and plan:
+            if plan and (stopped or plan[1] is not None):
                 db.execute("UPDATE issue_plans SET error=NULL,next_check=0 WHERE issue_number=?", (number,))
                 if plan[0] in {"awaiting_review", "approved"}:
                     stage = "AwaitingApproval"
@@ -220,14 +235,7 @@ def main():
                 parser.error("Invalid or duplicate Issue number in code profiles")
             allowed_files[int(number)] = check_paths(paths)
             handlers[int(number)] = partial(run, files=allowed_files[int(number)])
-    policy = os.environ.get("LOOM_PUBLISH_ISSUES")
     app_config = Path(os.environ.get("LOOM_GITHUB_APP_CONFIG", DEFAULT_CONFIG))
-    static_publish = {}
-    if policy:
-        for number in policy.split(","):
-            if not number.isascii() or not number.isdecimal() or int(number) not in allowed_files:
-                parser.error("Publishing policy must select configured Issue numbers")
-            static_publish[int(number)] = allowed_files[int(number)]
 
     with (data / "worker.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -257,15 +265,15 @@ def main():
                 db.execute("DELETE FROM worker_profiles")
                 db.executemany("INSERT INTO worker_profiles VALUES (?)", ((number,) for number in handlers))
                 worker_registry.report_system_config(db, model=default_model(), pool_limit=parallelism,
-                                                     profiles=allowed_files, static_publication=static_publish)
+                                                     profiles=allowed_files, static_publication=())
             stop = Event()
             signal.signal(signal.SIGTERM, lambda *_: stop.set())
             signal.signal(signal.SIGINT, lambda *_: stop.set())
-            supervise(db, data, handlers, allowed_files, app_config, static_publish,
+            supervise(db, data, handlers, allowed_files, app_config,
                       parallelism, stop, once=args.once)
 
 
-def advance(data, worker, issue, handler, paths, app_config, static_publish):
+def advance(data, worker, issue, handler, paths, app_config):
     with (closing(sqlite3.connect(data / "workflow.sqlite", timeout=10)) as db,
           agent_context(worker["id"], model=worker["model"], skills=worker["skills"], issue=issue)):
         handlers = {issue: handler}
@@ -276,15 +284,10 @@ def advance(data, worker, issue, handler, paths, app_config, static_publish):
         if run_ci_repair(db, handlers, data):
             return
         if app_config.is_file():
-            approved = db.execute(
-                "SELECT approved FROM publication_approvals WHERE issue_number=?", (issue,)
-            ).fetchone() == (1,)
-            if static_publish or approved:
-                run_publication(db, {issue: paths}, data, app_config,
-                                {issue} if not static_publish else set())
+            run_publication(db, {issue: paths}, data, app_config)
 
 
-def supervise(db, data, handlers, allowed_files, app_config, static_publish, parallelism, stop, *, once=False):
+def supervise(db, data, handlers, allowed_files, app_config, parallelism, stop, *, once=False):
     active = {}
     cursors = {}
     with ThreadPoolExecutor(max_workers=parallelism) as pool:
@@ -311,7 +314,7 @@ def supervise(db, data, handlers, allowed_files, app_config, static_publish, par
                         if worker_registry.claim(db, worker_id, issue):
                             active[worker_id, issue] = pool.submit(
                                 advance, data, worker, issue, handlers[issue], allowed_files[issue],
-                                app_config, issue in static_publish,
+                                app_config,
                             )
                             cursors[worker_id] = index + 1
                             break

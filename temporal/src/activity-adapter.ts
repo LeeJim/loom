@@ -196,7 +196,7 @@ export function pilotActivities(options: PilotOptions): Activities {
     publish: async (issue, plan, patch) => {
       const isEnabled = async () => {
         const info = await github.repo<GitHubIssue>(github.issuePath(issue));
-        return info.state === "open" && info.labels.some(label => label.name === "loom:publish");
+        return info.state === "open" && !info.pull_request;
       };
       if (!await isEnabled()) return null;
       const { base, content } = JSON.parse((await artifacts.read(patch)).toString()) as { base: string; content: string };

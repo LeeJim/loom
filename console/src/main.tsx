@@ -9,6 +9,7 @@ import { CapabilitiesPage, Workers } from "./operations";
 import { Audit, ExecutionDetail, Executions } from "./history";
 import { Logs } from "./logs";
 import { Experiments } from "./experiments";
+import { IssueWorkflow } from "./workflow";
 import "./style.css";
 
 const navigation = [
@@ -59,6 +60,7 @@ createRoot(document.getElementById("root")!).render(<StrictMode><BrowserRouter b
     <Route element={<Layout />}>
       <Route index element={<Overview />} />
       <Route path="tasks" element={<Tasks />} />
+      <Route path="tasks/:issue" element={<IssueWorkflow />} />
       <Route path="executions" element={<Executions />} />
       <Route path="executions/:id" element={<ExecutionDetail />} />
       <Route path="workers" element={<Workers />} />

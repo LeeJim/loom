@@ -1,4 +1,4 @@
-"""Publish an explicitly enabled delivery as a draft on the configured repository."""
+"""Publish a validated, approved delivery as a draft on the configured repository."""
 from base64 import b64encode
 from hashlib import sha256
 import json
@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from run_docs import REPO, ROOT, command
 
 from github_app import REPOSITORY, api, installation_token
+from plans import plan_directives
 
 
 def github(token, endpoint, *, body=None):
@@ -23,7 +24,7 @@ def prepare(number, data, approved_files, checkout, *, repository=REPO):
         raise ValueError("Delivery patch digest mismatch")
     command("git", "clone", "--depth", "1", "--single-branch", "--branch", "main", repository, str(checkout))
     if command("git", "rev-parse", "HEAD", cwd=checkout).strip() != metadata["base"]:
-        raise ValueError("The patch base changed")
+        raise PublicationNeedsPlan("The patch base changed")
     command("git", "apply", "--index", str(patch), cwd=checkout)
     changed = set(command("git", "diff", "--cached", "--name-only", "-z", cwd=checkout).strip("\0").split("\0"))
     if not changed or not changed <= set(approved_files):
@@ -42,23 +43,43 @@ def prepare(number, data, approved_files, checkout, *, repository=REPO):
     return command("git", "rev-parse", "HEAD", cwd=checkout).strip(), metadata["sha256"]
 
 
-def verify_publish_label(db, number, token):
-    enabled = db.execute("SELECT approved FROM publication_approvals WHERE issue_number=?", (number,)).fetchone()
-    if enabled != (1,):
-        raise ValueError("Issue publication authorization was revoked")
-    issue = github(token, f"/issues/{number}")
-    if issue["state"] != "open" or not any(label["name"] == "loom:publish" for label in issue["labels"]):
-        raise ValueError("The open Issue must still carry the publishing label")
+class PublicationBlocked(ValueError):
+    pass
 
 
-def publish(db, number, data, approved_files, app_config, *, require_label=False):
+class PublicationNeedsPlan(PublicationBlocked):
+    pass
+
+
+def verify_approved_delivery(db, number, token, approved_files, base):
+    plan = db.execute("""
+        SELECT p.title,p.body,p.profile,p.base_sha,p.approval_comment_id,p.posted_at,p.comment_url
+        FROM issue_plans p JOIN jobs j ON j.number=p.issue_number
+        WHERE p.issue_number=? AND p.state='approved' AND j.stage='Delivery' AND j.last_error IS NULL
+    """, (number,)).fetchone()
+    if not plan or not plan[4] or tuple(json.loads(plan[2])) != tuple(approved_files) or plan[3] != base:
+        raise PublicationNeedsPlan("Validated patch does not match the approved plan")
+    endpoint = f"/repos/{REPOSITORY}/issues/{number}"
+    issue = api(token, endpoint)
+    if issue.get("state") != "open" or issue.get("pull_request"):
+        raise PublicationBlocked("The Issue must be open")
+    if (issue["title"], issue.get("body") or "") != plan[:2]:
+        raise PublicationNeedsPlan("Issue changed since the plan was approved")
+    directives = list(plan_directives(token, endpoint, plan[5], plan[6]))
+    if any(item["feedback"] != "通过" for item in directives) or not any(
+        item["comment_id"] == plan[4] and item["feedback"] == "通过" for item in directives
+    ):
+        raise PublicationNeedsPlan("The stored plan approval is no longer current")
+
+
+def publish(db, number, data, approved_files, app_config):
     with tempfile.TemporaryDirectory(dir=ROOT, prefix="publish-") as temp:
         checkout = Path(temp) / "checkout"
+        metadata = json.loads((data / f"issue-{number}.json").read_text())
+        token = installation_token(app_config)
+        verify_approved_delivery(db, number, token, approved_files, metadata["base"])
         sha, digest = prepare(number, data, approved_files, checkout)
         branch = f"codex/loom-issue-{number}-{digest[:12]}"
-        token = installation_token(app_config)
-        if require_label:
-            verify_publish_label(db, number, token)
         basic = b64encode(f"x-access-token:{token}".encode()).decode("ascii")
         env = os.environ | {
             "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_COUNT": "2",
@@ -77,11 +98,10 @@ def publish(db, number, data, approved_files, app_config, *, require_label=False
         if existing:
             pr = existing[0]
         else:
-            if require_label:
-                verify_publish_label(db, number, token)
+            verify_approved_delivery(db, number, token, approved_files, metadata["base"])
             pr = github(token, "/pulls", body={
                 "title": f"loom: Issue #{number}", "head": branch, "base": "main", "draft": True,
-                "body": f"关联 #{number}。由 loom 沙箱生成并通过本地补丁检查。",
+                "body": f"关联 #{number}。由 Loom 根据已批准的方案生成并通过本地补丁检查。",
             })
         pr_number = pr["number"]
         url = f"https://github.com/{REPOSITORY}/pull/{pr_number}"

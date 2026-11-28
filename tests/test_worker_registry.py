@@ -77,6 +77,6 @@ class WorkerTests(unittest.TestCase):
 
         with patch.object(worker, "advance", side_effect=run_issue):
             worker.supervise(self.db, self.data, {13: None, 15: None}, {13: (), 15: ()},
-                             self.data / "app.json", {}, 2, Event(), once=True)
+                             self.data / "app.json", 2, Event(), once=True)
         self.assertCountEqual(completed, [13, 15])
         self.assertEqual(self.db.execute("SELECT count(*) FROM loom_issue_claims").fetchone(), (0,))

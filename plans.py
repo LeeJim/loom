@@ -160,7 +160,7 @@ def review(db, number, paths, app_config):
                 f"允许修改：{', '.join(paths)}\n\n"
                 f"```text\n{safe_plan}\n```\n\n"
                 "如同意本版方案，请回复 `@loom 通过`。如需调整，请回复 `@loom <反馈>`。\n"
-                "收到确认后才会修改代码。草稿 PR 的发布仍使用 `loom:publish` 标签。"
+                "收到确认后才会修改代码。通过验证和评审后，Loom 会自动创建草稿 PR。"
             )})
         if not matches(comment):
             raise BotIdentityError("Plan comment was not authored by the configured GitHub App")

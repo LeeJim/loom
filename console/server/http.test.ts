@@ -20,12 +20,12 @@ async function fixture() {
     CREATE TABLE workflow_stage_events(id INTEGER PRIMARY KEY,execution_id INTEGER,stage TEXT,recorded_at TEXT);
     CREATE TABLE workflow_artifacts(id INTEGER PRIMARY KEY,execution_id INTEGER,stage TEXT,direction TEXT,payload TEXT,recorded_at TEXT);
     CREATE TABLE worker_heartbeat(id INTEGER PRIMARY KEY,checked_at TEXT);
-    CREATE TABLE pr_deliveries(issue_number INTEGER,pr_number INTEGER);
+    CREATE TABLE pr_deliveries(issue_number INTEGER,pr_number INTEGER,pr_url TEXT);
     CREATE TABLE publications(issue_number INTEGER,status TEXT,error TEXT);
     CREATE TABLE publication_approvals(issue_number INTEGER,approved INTEGER);
     CREATE TABLE worker_profiles(issue_number INTEGER PRIMARY KEY);
     CREATE TABLE manual_runs(issue_number INTEGER PRIMARY KEY,status TEXT,requested_at TEXT DEFAULT CURRENT_TIMESTAMP);
-    CREATE TABLE issue_plans(issue_number INTEGER,comment_url TEXT,state TEXT,error TEXT);
+    CREATE TABLE issue_plans(issue_number INTEGER,plan_id TEXT,comment_url TEXT,state TEXT,error TEXT,approval_comment_id INTEGER);
     CREATE TABLE ci_validations(run_id INTEGER PRIMARY KEY,issue_number INTEGER,conclusion TEXT);
     CREATE TABLE ci_validation_attempts(run_id INTEGER,attempt INTEGER,conclusion TEXT,recorded_at TEXT);
     CREATE TABLE ci_repairs(run_id INTEGER,attempt INTEGER,status TEXT,error TEXT,patch_path TEXT);
@@ -108,7 +108,7 @@ test("existing SQLite snapshot and execution records survive the Node rollout", 
 test("direct page loads return the React app while unknown APIs return 404", async () => {
   const http = await client("/unused.sqlite", new OAuth("https://console.test"));
   try {
-    for (const path of ["/", "/tasks", "/executions/17", "/workers", "/capabilities", "/audit", "/console/tasks", "/console/executions/17", "/console/logs"]) {
+    for (const path of ["/", "/tasks", "/executions/17", "/workers", "/capabilities", "/audit", "/console/tasks", "/console/tasks/13", "/console/executions/17", "/console/logs"]) {
       const response = await http.call(path, { host: "console.test" });
       assert.equal(response.status, 200, path);
       const asset = /src="\/console(\/assets\/[^"]+)"/.exec(response.text)?.[1];
@@ -255,4 +255,33 @@ test("shows default Worker config on the existing read path, including old datab
     assert.deepEqual(result.profiles, [{ issue: 13, files: ["README.md"] }]);
     assert.deepEqual(result.staticPublication, [13]);
   } finally { await http.close(); await data.cleanup(); }
+});
+
+test("Issue workflow exposes stage data and permits retry of a failed approved publication", async () => {
+  const data = await fixture();
+  const db = new DatabaseSync(data.path);
+  db.exec(`UPDATE jobs SET stage='Delivery' WHERE number=13;
+    INSERT INTO issue_plans VALUES(13,'p1',NULL,'approved',NULL,123);
+    INSERT INTO publications VALUES(13,'failed','HTTPError');`);
+  db.close();
+  const { oauth } = githubStub();
+  const login = oauth.begin();
+  const [session] = await oauth.finish(new URL(login.url).searchParams.get("state"), "code", login.cookies[0]);
+  const clientHttp = await client(data.path, oauth);
+  try {
+    const path = "/api/snapshot?view=workflow&issue=13";
+    assert.equal((await clientHttp.call(path, { host: "console.test" })).status, 401);
+    const response = await clientHttp.call(path, { host: "console.test", cookie: session });
+    assert.equal(response.status, 200);
+    const result = JSON.parse(response.text);
+    assert.equal(result.job.publication_status, "failed");
+    assert.equal(result.job.manual_allowed, 1);
+    assert.equal(result.executions[0].stages[0].stage, "Planning");
+    assert.deepEqual(result.executions[0].artifacts[0].payload, { plan: "fixture" });
+    assert.equal((await clientHttp.call("/api/run", { host: "console.test", origin: "https://console.test",
+      cookie: session, method: "POST", body: { issue: 13 } })).status, 202);
+    const queued = JSON.parse((await clientHttp.call(path, { host: "console.test", cookie: session })).text);
+    assert.equal(queued.job.manual_status, "queued");
+    assert.equal(queued.job.manual_allowed, 0);
+  } finally { await clientHttp.close(); await data.cleanup(); }
 });

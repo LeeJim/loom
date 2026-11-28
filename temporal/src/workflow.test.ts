@@ -65,13 +65,9 @@ test("two Issues resume from approval after Worker restart; stale and duplicate 
         await reach(0, "approval", 2);
         await client.directive(first, { id: 102, actorId: 1, version: 1, kind: "approve" });
         await client.directive(second, { id: 101, actorId: 1, version: 1, kind: "approve" });
-        await reach(1, "publication", 1);
-        await client.publication(second);
         await reach(1, "ci", 1);
         assert.deepEqual(deliveries, [21]);
         await client.directive(first, { id: 201, actorId: 1, version: 2, kind: "approve" });
-        await reach(0, "publication", 2);
-        await client.publication(first);
         await reach(0, "ci", 2);
         const ci = { runId: 50, attempt: 1, pr: 11, headSha: "head", conclusion: "success" };
         await client.ci(first, { ...ci, headSha: "wrong" });
