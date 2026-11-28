@@ -26,7 +26,7 @@ flowchart TD
 
 ## 控制台
 
-控制台使用 React、TypeScript 和 React Router，Node.js 服务读取现有 SQLite 数据。左侧菜单可切换总览、任务、执行记录、Worker、能力与审计。
+控制台使用 React、TypeScript 和 React Router，Node.js 服务读取现有 SQLite 数据。左侧菜单可切换总览、任务、执行记录、Worker、能力、审计与日志。
 
 使用 GitHub 登录后，仓库授权者可以创建、启动、暂停和排空自己的 Worker。Worker 可并行推进不同 Issue，同一个 Issue 同时只有一个 Worker 处理。能力页展示 AgentGateway 模型、MCP 工具和已配置的 SkillHub 技能版本。
 

@@ -31,7 +31,9 @@ async function fixture() {
     CREATE TABLE ci_repairs(run_id INTEGER,attempt INTEGER,status TEXT,error TEXT,patch_path TEXT);
     CREATE TABLE loom_workers(id TEXT PRIMARY KEY,owner_id INTEGER,name TEXT,issue_number INTEGER,model TEXT,skills TEXT,state TEXT,last_seen_at TEXT);
     CREATE TABLE loom_issue_claims(issue_number INTEGER,worker_id TEXT);
-    CREATE TABLE loom_worker_actions(worker_id TEXT,actor_id INTEGER,action TEXT);
+    CREATE TABLE loom_worker_actions(id INTEGER PRIMARY KEY,worker_id TEXT,actor_id INTEGER,action TEXT,recorded_at TEXT DEFAULT CURRENT_TIMESTAMP);
+    CREATE TABLE webhook_deliveries(id TEXT PRIMARY KEY,event TEXT,received_at TEXT);
+    INSERT INTO webhook_deliveries VALUES ('fixture','issues','2026-01-01 00:00:00');
     INSERT INTO worker_profiles VALUES (13);
     INSERT INTO jobs VALUES (13,'Example','Planning',0,NULL);
     INSERT INTO workflow_executions VALUES (1,13,'plan_review','completed','2026-01-01 00:00:00',NULL,NULL);
@@ -94,13 +96,19 @@ test("existing SQLite snapshot and execution records survive the Node rollout", 
     assert.equal(JSON.parse(result.text).artifacts[0].payload.plan, "fixture");
     assert.equal((await http.call("/api/snapshot", { host: "console.test" })).status, 401);
     assert.equal((await http.call("/api/workers")).status, 401);
+    const logs = await http.call("/api/snapshot?view=logs&issue=13");
+    assert.equal(logs.status, 200);
+    assert.deepEqual(JSON.parse(logs.text).entries.map((row: { source: string }) => row.source).sort(),
+      ["execution", "stage"]);
+    assert.equal((await http.call("/api/snapshot?view=logs", { host: "console.test" })).status, 401);
+    assert.equal((await http.call("/api/snapshot?view=logs&issue=invalid")).status, 400);
   } finally { await http.close(); await data.cleanup(); }
 });
 
 test("direct page loads return the React app while unknown APIs return 404", async () => {
   const http = await client("/unused.sqlite", new OAuth("https://console.test"));
   try {
-    for (const path of ["/", "/tasks", "/executions/17", "/workers", "/capabilities", "/audit", "/console/tasks", "/console/executions/17"]) {
+    for (const path of ["/", "/tasks", "/executions/17", "/workers", "/capabilities", "/audit", "/console/tasks", "/console/executions/17", "/console/logs"]) {
       const response = await http.call(path, { host: "console.test" });
       assert.equal(response.status, 200, path);
       const asset = /src="\/console(\/assets\/[^"]+)"/.exec(response.text)?.[1];
@@ -153,5 +161,11 @@ test("Worker actions enforce same-origin and authenticated ownership", async () 
     assert.equal((await http.call("/api/workers/state", { ...headers, body: { id: other, state: "running" } })).status, 404);
     assert.equal((await http.call("/api/workers/state", { ...headers, body: { id: ownerWorker.id, state: "running" } })).status, 200);
     assert.equal((await http.call("/api/run", { ...headers, body: { issue: 13 } })).status, 202);
+    assert.equal((await http.call("/api/run", { ...headers, body: { issue: 13 } })).status, 409);
+    const actions = await http.call("/api/snapshot?view=logs&source=console", { host: "console.test", cookie: session });
+    assert.deepEqual(JSON.parse(actions.text).entries.map((row: { outcome: string }) => row.outcome), ["rejected", "queued"]);
+    const privateLogs = await http.call("/api/snapshot?view=logs&source=worker", { host: "console.test", cookie: session });
+    assert.equal(JSON.parse(privateLogs.text).entries.length, 2);
+    assert.equal(JSON.parse((await http.call("/api/snapshot?view=logs&source=worker")).text).entries.length, 0);
   } finally { await http.close(); await data.cleanup(); }
 });

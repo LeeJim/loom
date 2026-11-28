@@ -1,12 +1,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Link, NavLink, Outlet, Route, Routes, useLocation } from "react-router-dom";
-import { Activity, Blocks, ChevronRight, CircleCheck, ClipboardList, Github, LayoutDashboard, LogOut, Workflow } from "lucide-react";
+import { Activity, Blocks, ChevronRight, CircleCheck, ClipboardList, FileText, Github, LayoutDashboard, LogOut, Workflow } from "lucide-react";
 import { base, type Session } from "./api";
 import { useResource } from "./ui";
 import { Overview, Tasks } from "./tasks";
 import { CapabilitiesPage, Workers } from "./operations";
 import { Audit, ExecutionDetail, Executions } from "./history";
+import { Logs } from "./logs";
 import "./style.css";
 
 const navigation = [
@@ -16,6 +17,7 @@ const navigation = [
   { to: "/workers", label: "Worker", icon: Workflow },
   { to: "/capabilities", label: "能力", icon: Blocks },
   { to: "/audit", label: "审计", icon: CircleCheck },
+  { to: "/logs", label: "日志", icon: FileText },
 ];
 
 function Layout() {
@@ -60,6 +62,7 @@ createRoot(document.getElementById("root")!).render(<StrictMode><BrowserRouter b
       <Route path="workers" element={<Workers />} />
       <Route path="capabilities" element={<CapabilitiesPage />} />
       <Route path="audit" element={<Audit />} />
+      <Route path="logs" element={<Logs />} />
       <Route path="*" element={<div className="notice">页面不存在。 <Link to="/">返回总览</Link></div>} />
     </Route>
   </Routes>

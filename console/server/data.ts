@@ -137,8 +137,9 @@ export function setWorkerState(db: DatabaseSync, owner: number, id: unknown, sta
   });
 }
 
-export function queueRun(db: DatabaseSync, issue: number) {
-  return db.prepare(`
+export function queueRun(db: DatabaseSync, issue: number, actor: number) {
+  return write(db, () => {
+    const queued = db.prepare(`
     INSERT INTO manual_runs(issue_number,status)
     SELECT j.number,'queued' FROM jobs j JOIN worker_profiles p ON p.issue_number=j.number
     WHERE j.number=? AND NOT EXISTS (SELECT 1 FROM pr_deliveries WHERE issue_number=j.number)
@@ -150,5 +151,13 @@ export function queueRun(db: DatabaseSync, issue: number) {
       AND NOT EXISTS (SELECT 1 FROM loom_issue_claims WHERE issue_number=j.number)
     ON CONFLICT(issue_number) DO UPDATE SET status='queued',requested_at=CURRENT_TIMESTAMP
       WHERE manual_runs.status NOT IN ('queued','running','awaiting_plan')
-  `).run(issue).changes > 0;
+    `).run(issue).changes > 0;
+    db.exec(`CREATE TABLE IF NOT EXISTS loom_console_actions (
+      id INTEGER PRIMARY KEY, actor_id INTEGER NOT NULL, issue_number INTEGER NOT NULL,
+      action TEXT NOT NULL, outcome TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`);
+    db.prepare(`INSERT INTO loom_console_actions(actor_id,issue_number,action,outcome)
+      VALUES (?,?,'run_request',?)`).run(actor, issue, queued ? "queued" : "rejected");
+    return queued;
+  });
 }
