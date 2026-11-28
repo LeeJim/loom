@@ -176,6 +176,29 @@ class Handler(BaseHTTPRequestHandler):
                     entry["installed"] = True
             self.json_response(200, result)
             return
+        if path == "/api/temporal/activities":
+            pilot_db = os.environ.get("LOOM_TEMPORAL_CONSOLE_DB")
+            if not pilot_db:
+                self.json_response(200, {"enabled": False, "activities": []})
+                return
+            try:
+                uri = Path(pilot_db).resolve().as_uri() + "?mode=ro"
+                with closing(sqlite3.connect(uri, uri=True, timeout=3)) as db:
+                    db.row_factory = sqlite3.Row
+                    rows = db.execute("""
+                        SELECT id, workflow_id, issue_number, activity, attempt, status,
+                               inputs, output, started_at, finished_at
+                        FROM temporal_activity_records ORDER BY id DESC LIMIT 60
+                    """)
+                    activities = [dict(row) for row in rows]
+                for item in activities:
+                    item["inputs"] = json.loads(item["inputs"])
+                    item["output"] = json.loads(item["output"]) if item["output"] is not None else None
+            except (sqlite3.Error, ValueError):
+                self.respond(503, "unavailable")
+                return
+            self.json_response(200, {"enabled": True, "activities": activities})
+            return
         match = re.fullmatch(r"/api/executions/([1-9][0-9]{0,15})", path)
         if path == "/api/audit" or match:
             try:
