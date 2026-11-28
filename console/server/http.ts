@@ -10,7 +10,7 @@ import {
 import { logFilters, recentLogs } from "./logs.js";
 import { OAuth, OAuthError } from "./oauth.js";
 
-const fallbackRoutes = new Set(["/", "/tasks", "/executions", "/workers", "/capabilities", "/audit", "/logs"]);
+const fallbackRoutes = new Set(["/", "/tasks", "/executions", "/workers", "/capabilities", "/audit", "/logs", "/experiments"]);
 const staticRoot = fileURLToPath(new URL("../web/", import.meta.url));
 const headers = {
   "Cache-Control": "no-store",
@@ -81,6 +81,13 @@ export function consoleServer({
       if (path.startsWith("/api/")) {
         if (!user && (!local || path.startsWith("/api/workers"))) return fail(401, "login_required");
         if (get && path === "/api/snapshot") {
+          if (url.searchParams.get("view") === "experiments") {
+            const store = process.env.LOOM_EXPERIMENT_CONSOLE_DB;
+            const reports = store ? withDb(store, true, db => db.prepare(
+              "SELECT report FROM planning_experiment_reports ORDER BY recorded_at DESC,id DESC LIMIT 10"
+            ).all().map(row => JSON.parse(String(row.report)))) : [];
+            return json(200, { enabled: Boolean(store), reports });
+          }
           if (url.searchParams.get("view") === "logs") {
             const filters = logFilters(url.searchParams);
             return json(200, withDb(database, true, db => recentLogs(db, filters, user?.id, temporalDb)));
