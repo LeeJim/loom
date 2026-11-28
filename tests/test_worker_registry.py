@@ -28,6 +28,16 @@ class WorkerTests(unittest.TestCase):
         item = worker_registry.create_worker(self.db, owner, name, issue)
         return item["id"]
 
+    def test_reports_effective_system_worker_configuration(self):
+        with self.db:
+            worker_registry.report_system_config(
+                self.db, model="deepseek/custom", pool_limit=3,
+                profiles={15: ("src/example.js",)}, static_publication={15: ("src/example.js",)},
+            )
+        self.assertEqual(self.db.execute("""
+            SELECT model,pool_limit,profiles,static_publication FROM loom_system_worker_config
+        """).fetchone(), ("deepseek/custom", 3, '{"15": ["src/example.js"]}', "[15]"))
+
     def test_owner_scope_and_draining(self):
         first = self.create(1, "First", 13)
         self.create(2, "Second")

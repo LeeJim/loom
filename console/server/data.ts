@@ -84,6 +84,35 @@ const workerSelect = `SELECT w.id,w.owner_id,w.name,w.issue_number,w.model,w.ski
   FROM loom_workers w LEFT JOIN loom_issue_claims c ON c.worker_id=w.id`;
 const workerRow = (row: Record<string, unknown>) => ({ ...row, skills: JSON.parse(String(row.skills)) });
 
+export function systemWorker(db: DatabaseSync) {
+  const table = db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?");
+  const runtime = table.get("loom_system_worker_config") && db.prepare(
+    "SELECT model,pool_limit,profiles,static_publication FROM loom_system_worker_config WHERE id=1",
+  ).get();
+  const heartbeat = table.get("worker_heartbeat")
+    ? db.prepare("SELECT checked_at FROM worker_heartbeat WHERE id=1").get()?.checked_at : null;
+  const issue = table.get("loom_issue_claims")
+    ? db.prepare("SELECT issue_number FROM loom_issue_claims WHERE worker_id='system'").get()?.issue_number : null;
+  const personal = table.get("loom_workers") && db.prepare("SELECT 1 FROM loom_workers LIMIT 1").get();
+  const profiles = runtime ? Object.entries(JSON.parse(String(runtime.profiles)))
+    .map(([number, files]) => ({ issue: Number(number), files })).sort((a, b) => a.issue - b.issue)
+    : table.get("worker_profiles") ? db.prepare("SELECT issue_number FROM worker_profiles ORDER BY issue_number")
+      .all().map(row => ({ issue: row.issue_number, files: null })) : [];
+  const fresh = typeof heartbeat === "string" &&
+    Date.now() - Date.parse(heartbeat.replace(" ", "T") + "Z") < 30_000;
+
+  return {
+    model: runtime?.model ?? null,
+    poolLimit: runtime?.pool_limit ?? null,
+    profiles,
+    staticPublication: runtime ? JSON.parse(String(runtime.static_publication)) : null,
+    activeIssue: fresh ? issue ?? null : null,
+    heartbeat: heartbeat ?? null,
+    status: personal ? "delegated" : !profiles.length ? "unconfigured" : fresh ? "running" : "unavailable",
+  };
+}
+
+
 export function workers(db: DatabaseSync, owner: number) {
   return db.prepare(workerSelect + " WHERE w.owner_id=? ORDER BY w.name").all(owner).map(workerRow);
 }

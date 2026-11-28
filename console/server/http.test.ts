@@ -231,3 +231,28 @@ test("RSI recommendations require an approved reviewer and record only one decis
     await data.cleanup();
   }
 });
+
+test("shows default Worker config on the existing read path, including old database fallback", async () => {
+  const data = await fixture();
+  const http = await client(data.path, new OAuth("https://console.test"));
+  const url = "/api/snapshot?view=default-worker";
+  try {
+    const prior = await http.call(url);
+    assert.equal(prior.status, 200);
+    assert.equal(JSON.parse(prior.text).model, null);
+    assert.deepEqual(JSON.parse(prior.text).profiles, [{ issue: 13, files: null }]);
+    assert.equal((await http.call(url, { host: "console.test" })).status, 401);
+    const db = new DatabaseSync(data.path);
+    db.exec(`CREATE TABLE loom_system_worker_config(id INTEGER PRIMARY KEY,model TEXT,pool_limit INTEGER,
+      profiles TEXT,static_publication TEXT);
+      INSERT INTO loom_system_worker_config VALUES (1,'deepseek/custom',3,'{"13":["README.md"]}','[13]');
+      INSERT INTO worker_heartbeat VALUES (1,CURRENT_TIMESTAMP)`);
+    db.close();
+    const result = JSON.parse((await http.call(url)).text);
+    assert.equal(result.status, "running");
+    assert.equal(result.model, "deepseek/custom");
+    assert.equal(result.poolLimit, 3);
+    assert.deepEqual(result.profiles, [{ issue: 13, files: ["README.md"] }]);
+    assert.deepEqual(result.staticPublication, [13]);
+  } finally { await http.close(); await data.cleanup(); }
+});
