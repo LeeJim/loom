@@ -88,3 +88,23 @@ protected environment file. Install reviewed, pinned versions at
 to `/opt/loom/skills`; use the same `LOOM_SKILLHUB_SKILLS_DIR` on both
 services if you change it. Only installed versions can be assigned to a
 Worker, and they are mounted read-only.
+
+## Console runtime
+
+Rollout builds the React Console and Node.js service through `console/Dockerfile`.
+The release includes the Node.js runtime and compiled application. The
+deployment checks that runtime before changing the Controller or service
+overrides. The Console continues to bind to loopback on port 8790 and
+use the existing SQLite database.
+
+To run the Console locally with Node.js 22.13 or newer:
+
+```bash
+npm ci --prefix console
+npm run build --prefix console
+LOOM_DB=/absolute/path/to/workflow.sqlite npm start --prefix console
+```
+
+Open `http://127.0.0.1:8790/console/`. The same build also works through
+Caddy's existing `handle_path /console/*` route. Worker management uses
+the configured GitHub OAuth credentials.
