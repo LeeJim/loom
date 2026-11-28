@@ -193,3 +193,41 @@ test("experiment reports are surfaced through the existing protected read endpoi
     await data.cleanup();
   }
 });
+
+test("RSI recommendations require an approved reviewer and record only one decision", async () => {
+  const data = await fixture();
+  const id = "loom-rsi/" + "a".repeat(20) + "/review";
+  const db = new DatabaseSync(data.path);
+  db.exec(`CREATE TABLE planning_experiment_reports(id TEXT PRIMARY KEY,report TEXT,recorded_at TEXT);
+    CREATE TABLE planning_rsi_recommendations(id TEXT PRIMARY KEY,recommendation TEXT,recorded_at TEXT DEFAULT CURRENT_TIMESTAMP)`);
+  db.prepare("INSERT INTO planning_rsi_recommendations(id,recommendation) VALUES(?,?)")
+    .run(id, JSON.stringify({ id, state: "pending_review", candidate: { id: "rsi-1", prompt: "candidate" }, comparisons: [] }));
+  db.close();
+  const oldStore = process.env.LOOM_EXPERIMENT_CONSOLE_DB;
+  const oldReviewers = process.env.LOOM_RSI_REVIEWER_IDS;
+  process.env.LOOM_EXPERIMENT_CONSOLE_DB = data.path;
+  process.env.LOOM_RSI_REVIEWER_IDS = "2";
+  const { oauth } = githubStub();
+  const login = oauth.begin();
+  const [session] = await oauth.finish(new URL(login.url).searchParams.get("state"), "code", login.cookies[0]);
+  const http = await client(data.path, oauth);
+  const request = { host: "console.test", method: "POST", origin: "https://console.test", cookie: session,
+    body: { id, decision: "approved" } };
+  try {
+    assert.equal((await http.call("/api/experiments/review", request)).status, 403);
+    const hidden = await http.call("/api/snapshot?view=experiments", { host: "console.test", cookie: session });
+    assert.equal(JSON.parse(hidden.text).recommendations[0].candidate, undefined);
+    process.env.LOOM_RSI_REVIEWER_IDS = "1";
+    assert.equal((await http.call("/api/experiments/review", request)).status, 201);
+    assert.equal((await http.call("/api/experiments/review", request)).status, 409);
+    const visible = await http.call("/api/snapshot?view=experiments", { host: "console.test", cookie: session });
+    assert.equal(JSON.parse(visible.text).recommendations[0].review.decision, "approved");
+  } finally {
+    if (oldStore === undefined) delete process.env.LOOM_EXPERIMENT_CONSOLE_DB;
+    else process.env.LOOM_EXPERIMENT_CONSOLE_DB = oldStore;
+    if (oldReviewers === undefined) delete process.env.LOOM_RSI_REVIEWER_IDS;
+    else process.env.LOOM_RSI_REVIEWER_IDS = oldReviewers;
+    await http.close();
+    await data.cleanup();
+  }
+});

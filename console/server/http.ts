@@ -8,6 +8,7 @@ import {
   snapshot, temporalActivities, timeline, validateWorker, withDb, workers,
 } from "./data.js";
 import { logFilters, recentLogs } from "./logs.js";
+import { canReviewRsi, listRsi, reviewRsi } from "./rsi.js";
 import { OAuth, OAuthError } from "./oauth.js";
 
 const fallbackRoutes = new Set(["/", "/tasks", "/executions", "/workers", "/capabilities", "/audit", "/logs", "/experiments"]);
@@ -86,7 +87,8 @@ export function consoleServer({
             const reports = store ? withDb(store, true, db => db.prepare(
               "SELECT report FROM planning_experiment_reports ORDER BY recorded_at DESC,id DESC LIMIT 10"
             ).all().map(row => JSON.parse(String(row.report)))) : [];
-            return json(200, { enabled: Boolean(store), reports });
+            const recommendations = store ? listRsi(store, database, user?.id) : [];
+            return json(200, { enabled: Boolean(store), reports, recommendations });
           }
           if (url.searchParams.get("view") === "logs") {
             const filters = logFilters(url.searchParams);
@@ -104,10 +106,19 @@ export function consoleServer({
         }
         if (get && path === "/api/workers") return json(200, withDb(database, true, db => workers(db, user!.id)));
       }
-      if (req.method === "POST" && ["/api/run", "/api/workers", "/api/workers/state", "/oauth/logout"].includes(path)) {
+      if (req.method === "POST" && ["/api/run", "/api/workers", "/api/workers/state", "/api/experiments/review", "/oauth/logout"].includes(path)) {
         if (req.headers.origin !== origin) return fail(403, "invalid_origin");
         if (path === "/oauth/logout") return redirect("/console/", [oauth.logout(req.headers.cookie)]);
         const input = await body(req, path === "/api/run" ? 128 : 4096);
+        if (path === "/api/experiments/review") {
+          if (!user) return fail(401, "login_required");
+          if (!canReviewRsi(user.id)) return fail(403, "review_permission_required");
+          const store = process.env.LOOM_EXPERIMENT_CONSOLE_DB;
+          if (!store) return fail(503, "unavailable");
+          const status = reviewRsi(store, database, user.id, input.id, input.decision);
+          if (status === 201) return json(201, { status: input.decision });
+          return fail(status, status === 404 ? "not_found" : status === 409 ? "not_reviewable" : "invalid_request");
+        }
         if (path === "/api/run") {
           if (!user) return fail(401, "login_required");
           if (!positiveInt(input.issue)) throw new InvalidRequest();

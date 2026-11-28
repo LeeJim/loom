@@ -8,11 +8,13 @@ import { NativeConnection, Worker } from "@temporalio/worker";
 import { ArtifactStore } from "./artifacts.js";
 import { validateExperiment, type Experiment } from "./experiment.js";
 import { experimentActivities } from "./experiment-activities.js";
-import type { comparePlanningAgents } from "./experiment-workflow.js";
+import { validateRsi, type RsiManifest } from "./rsi.js";
+import { rsiActivities } from "./rsi-activities.js";
 
-const [manifest, runKey] = process.argv.slice(2);
+const rsi = process.argv[2] === "--rsi";
+const [manifest, runKey] = process.argv.slice(rsi ? 3 : 2);
 if (!manifest || !runKey || !/^[A-Za-z0-9_-]{1,40}$/.test(runKey)) {
-  throw new Error("Usage: npm run experiment -- <manifest.json> <run-key>");
+  throw new Error("Usage: npm run experiment|rsi -- <manifest.json> <run-key>");
 }
 const data = process.env.LOOM_EXPERIMENT_DATA;
 const workspace = process.env.LOOM_EXPERIMENT_WORKSPACE;
@@ -22,7 +24,8 @@ if (!data || !workspace || !isAbsolute(data) || !isAbsolute(workspace) || data =
 const address = process.env.TEMPORAL_ADDRESS || "127.0.0.1:7233";
 const namespace = process.env.TEMPORAL_NAMESPACE || "default";
 const network = process.env.LOOM_EXPERIMENT_NETWORK || "loom-experiments";
-const spec = validateExperiment(JSON.parse(await readFile(manifest, "utf8")) as Experiment);
+const input = JSON.parse(await readFile(manifest, "utf8"));
+const spec = rsi ? validateRsi(input as RsiManifest) : validateExperiment(input as Experiment);
 await mkdir(data, { recursive: true, mode: 0o700 });
 await mkdir(workspace, { recursive: true, mode: 0o700 });
 const store = new ArtifactStore(join(data, "artifacts"));
@@ -35,23 +38,25 @@ const connection = await Connection.connect({ address });
 const native = await NativeConnection.connect({ address });
 try {
   db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000");
-  const taskQueue = `loom-planning-experiments-${createHash("sha256").update(data).digest("hex").slice(0, 16)}`;
+  const taskQueue = `loom-planning-${rsi ? "rsi" : "experiments"}-${createHash("sha256").update(data).digest("hex").slice(0, 16)}`;
   const worker = await Worker.create({
     connection: native, namespace, taskQueue, maxConcurrentActivityTaskExecutions: 2,
-    workflowsPath: fileURLToPath(new URL("./experiment-workflow.js", import.meta.url)),
-    activities: experimentActivities({ data, work: workspace, network, db }),
+    workflowsPath: fileURLToPath(new URL(rsi ? "./rsi-workflow.js" : "./experiment-workflow.js", import.meta.url)),
+    activities: { ...experimentActivities({ data, work: workspace, network, db }),
+      ...(rsi ? rsiActivities({ data, work: workspace, network, db }) : {}) },
   });
   const client = new Client({ connection, namespace });
-  const workflowId = `loom-exp/${snapshot.sha256.slice(0, 20)}/${runKey}`;
+  const workflowId = `loom-${rsi ? "rsi" : "exp"}/${snapshot.sha256.slice(0, 20)}/${runKey}`;
   const report = await worker.runUntil(async () => {
     try {
-      const run = await client.workflow.start<typeof comparePlanningAgents>("comparePlanningAgents", {
+      const run = await client.workflow.start(rsi ? "improvePlanningAgent" : "comparePlanningAgents", {
         workflowId, taskQueue, args: [snapshot], workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+        ...(rsi ? { workflowExecutionTimeout: "90 minutes" } : {}),
       });
       return run.result();
     } catch (error) {
       if (!(error instanceof Error) || error.name !== "WorkflowExecutionAlreadyStartedError") throw error;
-      return client.workflow.getHandle<typeof comparePlanningAgents>(workflowId).result();
+      return client.workflow.getHandle(workflowId).result();
     }
   });
   console.log(JSON.stringify(report, null, 2));
