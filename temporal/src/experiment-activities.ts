@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { DatabaseSync } from "node:sqlite";
 import { ArtifactStore } from "./artifacts.js";
 import type { Artifact } from "./contracts.js";
-import { planningPrompt, scorePlan, validateExperiment, type Experiment, type Result } from "./experiment.js";
+import { planningPrompt, scorePlan, validateExperiment, type Experiment, type Result, type Variant } from "./experiment.js";
 import type { ExperimentActivities } from "./experiment-workflow.js";
 import { runOpenCode } from "./opencode.js";
 
@@ -45,6 +45,30 @@ async function pi(work: string, config: string, network: string, image: string, 
   }
 }
 
+export type SandboxOptions = { work: string; network: string };
+
+export async function readOnlyTrial(options: SandboxOptions, variant: Variant, model: string,
+                                    files: Record<string, string>, prompt: string) {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(options.network)) throw new Error("Invalid experiment network");
+  const inspected = await execute("docker", ["network", "inspect", "--format", "{{.Internal}}", options.network]);
+  if (inspected.stdout.trim() !== "true") throw new Error("An internal experiment network is required");
+  const temp = await mkdtemp(join(await realpath(options.work), "planning-"));
+  try {
+    if (temp.includes(",")) throw new Error("Invalid work path");
+    const work = join(temp, "work");
+    for (const [path, content] of Object.entries(files)) {
+      const file = join(work, path);
+      await mkdir(dirname(file), { recursive: true, mode: 0o755 });
+      await writeFile(file, content, { mode: 0o644, flag: "wx" });
+    }
+    return variant.harness === "opencode"
+      ? await runOpenCode({ work, edit: false, model, network: options.network, image: variant.image, prompt })
+      : await pi(work, join(temp, "models.json"), options.network, variant.image, model, prompt);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+}
+
 export function experimentActivities(options: { data: string; work: string; network: string; db: DatabaseSync }): ExperimentActivities {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(options.network)) throw new Error("Invalid experiment network");
   const artifacts = new ArtifactStore(join(options.data, "artifacts"));
@@ -64,34 +88,17 @@ export function experimentActivities(options: { data: string; work: string; netw
       const entry = spec.cases.find(row => row.id === caseId);
       const variant = spec.variants.find(row => row.id === variantId);
       if (!entry || !variant) throw new Error("Unknown experiment trial");
-      const inspected = await execute("docker", ["network", "inspect", "--format", "{{.Internal}}", options.network]);
-      if (inspected.stdout.trim() !== "true") throw new Error("An internal experiment network is required");
-      const temp = await mkdtemp(join(await realpath(options.work), "planning-"));
-      if (temp.includes(",")) { await rm(temp, { recursive: true, force: true }); throw new Error("Invalid work path"); }
       const result = { variant: variant.id, caseId, scenario: entry.scenario };
       const start = Date.now();
+      let output;
       try {
-        const work = join(temp, "work");
-        for (const [path, content] of Object.entries(entry.files)) {
-          const file = join(work, path);
-          await mkdir(dirname(file), { recursive: true, mode: 0o755 });
-          await writeFile(file, content, { mode: 0o644, flag: "wx" });
-        }
-        const prompt = planningPrompt(entry, variant);
-        let output;
-        try {
-          output = variant.harness === "opencode"
-            ? await runOpenCode({ work, edit: false, model: spec.model, network: options.network, image: variant.image, prompt })
-            : await pi(work, join(temp, "models.json"), options.network, variant.image, spec.model, prompt);
-        } catch {
-          return { ...result, elapsedMs: Date.now() - start, score: { passed: false, failures: [] },
-            error: "harness_failed" } satisfies Result;
-        }
-        const artifact = await artifacts.put(output);
-        return { ...result, elapsedMs: Date.now() - start, score: scorePlan(output, entry), artifact: artifact.ref };
-      } finally {
-        await rm(temp, { recursive: true, force: true });
+        output = await readOnlyTrial(options, variant, spec.model, entry.files, planningPrompt(entry, variant));
+      } catch {
+        return { ...result, elapsedMs: Date.now() - start, score: { passed: false, failures: [] },
+          error: "harness_failed" } satisfies Result;
       }
+      const artifact = await artifacts.put(output);
+      return { ...result, elapsedMs: Date.now() - start, score: scorePlan(output, entry), artifact: artifact.ref };
     },
     async saveReport(report) {
       options.db.prepare("INSERT OR IGNORE INTO planning_experiment_reports(id,report) VALUES (?,?)")
