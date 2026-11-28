@@ -34,8 +34,8 @@ authorization, and CI matching. It uses transient test persistence.
    numbers to approved existing files. Set separate absolute directories
    for `LOOM_TEMPORAL_WORKSPACE` and `LOOM_TEMPORAL_DATA`.
    Provide the webhook secret via `GITHUB_WEBHOOK_SECRET_FILE`.
-4. Build with `npm run build`, then run `npm run pilot:controller` and
-   `npm run pilot:worker`. The Controller listens on loopback port 8788 by
+4. Build with `npm run build`, then run `npm run pilot:webhook` and
+   `npm run pilot:worker`. The webhook listener binds on loopback port 8788 by
    default. Route only the isolated repository webhook to
    `/webhooks/github` and subscribe to Issues, Issue comments, and Workflow
    runs. The Worker expects the Loom OpenCode sandbox image and an internal
@@ -57,3 +57,18 @@ The pilot Worker uses bounded Activity concurrency. The existing Console
 controls continue to manage the original Worker registry. Connecting personal
 Worker creation, pause, and drain to Temporal queues is a separate integration
 step before switching production routing.
+
+## Production cutover
+
+The GitHub webhook listener verifies signatures, checks repository and actor
+authorization, and durably queues accepted events. Temporal owns the Issue
+state and decides when to plan, wait, run, publish, and process CI. Activity
+implementations own external writes and use stable identifiers for retries.
+
+1. Validate the listener against a test repository, including duplicate
+   delivery and an outage of the Temporal service.
+2. Persist which engine owns each trial Issue before routing any events.
+   Keep existing Issue executions on the original engine until they drain.
+3. Switch health checks and Console queries to their replacement endpoints.
+   Confirm there are no remaining legacy consumers, then retire the old
+   Controller and scheduler under a separately approved production cutover.
