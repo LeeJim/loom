@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS loom_issue_claims (
     issue_number INTEGER PRIMARY KEY, worker_id TEXT NOT NULL UNIQUE,
     claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS loom_system_worker_config (
+    id INTEGER PRIMARY KEY CHECK (id=1), model TEXT NOT NULL, pool_limit INTEGER NOT NULL,
+    profiles TEXT NOT NULL, static_publication TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS loom_worker_actions (
     id INTEGER PRIMARY KEY, worker_id TEXT NOT NULL, actor_id INTEGER NOT NULL,
     action TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -40,6 +44,15 @@ def transaction(db):
 
 def initialize(db):
     db.executescript(SCHEMA)
+
+
+def report_system_config(db, *, model, pool_limit, profiles, static_publication):
+    db.execute("""
+        INSERT INTO loom_system_worker_config VALUES (1,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET model=excluded.model,pool_limit=excluded.pool_limit,
+            profiles=excluded.profiles,static_publication=excluded.static_publication
+    """, (model, pool_limit, json.dumps(profiles, sort_keys=True), json.dumps(sorted(static_publication))))
+
 
 
 def worker_dict(row):

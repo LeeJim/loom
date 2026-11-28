@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { capabilities, ModelCatalogUnavailable, ModelUnavailable } from "./capabilities.js";
 import {
   audit, createWorker, defaultDb, InvalidRequest, positiveInt, queueRun, setWorkerState,
-  snapshot, temporalActivities, timeline, validateWorker, withDb, workers,
+  snapshot, systemWorker, temporalActivities, timeline, validateWorker, withDb, workers,
 } from "./data.js";
 import { logFilters, recentLogs } from "./logs.js";
 import { canReviewRsi, listRsi, reviewRsi } from "./rsi.js";
@@ -82,6 +82,9 @@ export function consoleServer({
       if (path.startsWith("/api/")) {
         if (!user && (!local || path.startsWith("/api/workers"))) return fail(401, "login_required");
         if (get && path === "/api/snapshot") {
+          if (url.searchParams.get("view") === "default-worker") {
+            return json(200, withDb(database, true, systemWorker));
+          }
           if (url.searchParams.get("view") === "experiments") {
             const store = process.env.LOOM_EXPERIMENT_CONSOLE_DB;
             const reports = store ? withDb(store, true, db => db.prepare(

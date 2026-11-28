@@ -12,7 +12,7 @@ import sqlite3
 from threading import Event
 import time
 
-from run_docs import ROOT, PlanBaseChanged, agent_context, check_paths, run
+from run_docs import ROOT, PlanBaseChanged, agent_context, check_paths, default_model, run
 from publish import publish
 from github_app import DEFAULT_CONFIG
 import telemetry
@@ -247,15 +247,17 @@ def main():
                 requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, status TEXT NOT NULL
             )""")
             db.execute("CREATE TABLE IF NOT EXISTS worker_profiles (issue_number INTEGER PRIMARY KEY)")
-            with db:
-                db.execute("UPDATE manual_runs SET status='interrupted' WHERE status='running'")
-                db.execute("DELETE FROM worker_profiles")
-                db.executemany("INSERT INTO worker_profiles VALUES (?)", ((number,) for number in handlers))
             worker_registry.initialize(db)
             worker_registry.recover_claims(db)
             parallelism = int(os.environ.get("LOOM_MAX_PARALLEL_WORKERS", "2"))
             if not 1 <= parallelism <= 16:
                 parser.error("LOOM_MAX_PARALLEL_WORKERS must be between 1 and 16")
+            with db:
+                db.execute("UPDATE manual_runs SET status='interrupted' WHERE status='running'")
+                db.execute("DELETE FROM worker_profiles")
+                db.executemany("INSERT INTO worker_profiles VALUES (?)", ((number,) for number in handlers))
+                worker_registry.report_system_config(db, model=default_model(), pool_limit=parallelism,
+                                                     profiles=allowed_files, static_publication=static_publish)
             stop = Event()
             signal.signal(signal.SIGTERM, lambda *_: stop.set())
             signal.signal(signal.SIGINT, lambda *_: stop.set())

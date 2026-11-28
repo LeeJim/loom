@@ -41,9 +41,13 @@ def command(*args, cwd=None, timeout=120, env=None):
     ).stdout
 
 
+def default_model():
+    return os.environ.get("LOOM_AGENT_DEFAULT_MODEL", DEFAULT_MODEL)
+
+
 def agent(work, prompt, edit=False, *, stage=None):
     worker, selected, skills, issue = _agent_scope.get()
-    model = selected or os.environ.get("LOOM_AGENT_DEFAULT_MODEL", DEFAULT_MODEL)
+    model = selected or default_model()
     if not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,160}", model):
         raise ValueError("Invalid AgentGateway model identifier")
     gateway = os.environ.get("LOOM_SANDBOX_GATEWAY_URL", "http://gateway:4000/v1")

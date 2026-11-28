@@ -4,6 +4,33 @@ import { Box, Cpu, Plus, Puzzle } from "lucide-react";
 import { api, ApiError, base, type Capabilities, type Session, type Worker } from "./api";
 import { Badge, Empty, Page, Panel, ReadState, Refresh, time, useResource } from "./ui";
 
+type SystemWorker = {
+  model: string | null; poolLimit: number | null;
+  profiles: { issue: number; files: string[] | null }[]; staticPublication: number[] | null;
+  activeIssue: number | null; heartbeat: string | null;
+  status: "running" | "delegated" | "unconfigured" | "unavailable";
+};
+
+function DefaultWorker() {
+  const { data, error, loading, reload } = useResource<SystemWorker>("snapshot?view=default-worker", 15000);
+  const states = { delegated: "由个人 Worker 调度", unconfigured: "未配置任务", unavailable: "未检测到心跳" } as const;
+  return <Panel title="系统默认 Worker" action={<Refresh busy={loading} action={reload} />}>
+    <ReadState error={error} loading={loading && !data} />
+    {data && <ul className="rows">
+      <li><span>调度状态</span><Badge value={data.status === "running" ? "running" : states[data.status]} /></li>
+      <li><span>默认模型</span><strong>{data.model ?? "等待 Worker 上报"}</strong></li>
+      <li><span>执行池并发上限</span><strong>{data.poolLimit ?? "等待 Worker 上报"}</strong></li>
+      <li><span>最近心跳</span><span>{time(data.heartbeat)}</span></li>
+      {data.activeIssue !== null && <li><span>当前领取的 Issue</span><strong>#{data.activeIssue}</strong></li>}
+      <li><span>任务范围</span><strong>{data.profiles.length ? data.profiles.map(item => `#${item.issue}`).join("、") : "未配置"}</strong></li>
+      {data.profiles.filter(item => item.files !== null).map(item =>
+        <li key={item.issue}><span>Issue #{item.issue} · 允许修改文件</span><span>{item.files?.join("、")}</span></li>)}
+      {data.staticPublication !== null && <li><span>预授权发布</span><span>{data.staticPublication.length
+        ? data.staticPublication.map(issue => `#${issue}`).join("、") : "无预授权 Issue"}</span></li>}
+    </ul>}
+  </Panel>;
+}
+
 export function Workers() {
   const session = useOutletContext<Session | undefined>();
   const { data: workers, error, loading, reload } = useResource<Worker[]>(session?.user ? "workers" : null, 15000);
@@ -34,6 +61,7 @@ export function Workers() {
   return <Page title="Worker" description="创建、启动、暂停或排空你拥有的 Worker。"
     action={session?.user && <button className="button primary" onClick={() => setCreating(value => !value)}>
       <Plus size={16} />{creating ? "关闭表单" : "创建 Worker"}</button>}>
+    <DefaultWorker />
     {!session?.user ? <Panel><Empty>{session?.enabled ? <a className="text-link" href={base + "oauth/login"}>使用 GitHub 登录</a>
       : session ? "创建和管理 Worker 需要配置 GitHub OAuth。" : "正在检查登录状态…"}</Empty></Panel> : <>
       {notice && <div className="notice" role="status">{notice}</div>}
