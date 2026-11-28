@@ -8,7 +8,8 @@ Loom 是一套 **Agent 驱动的研发流程**，旨在改造从需求到交付�
 flowchart TD
     issue["GitHub Issue：记录需求"] --> plan["Agent：起草并回贴实现方案"]
     plan --> approval{"维护者确认方案"}
-    approval -->|已确认| code["Agent：在沙箱中修改获准的文件"]
+    approval -->|@loom 反馈| plan
+    approval -->|@loom 通过| code["Agent：在沙箱中修改获准的文件"]
     code --> validation{"Worker 本地验证"}
     validation -->|需要修复| repair["Agent 修复"]
     repair --> validation
@@ -19,9 +20,13 @@ flowchart TD
     ci --> status["控制台：查看 CI 结果"]
 ```
 
-- **需求和决策在 GitHub 留痕。** 实现方案回贴到原 Issue，由维护者回复 `/loom approve <方案编号>` 确认。草稿 PR 需要单独获得发布授权。
+- **需求和决策在 GitHub 留痕。** Loom 将方案回贴到原 Issue。有仓库写权限的开发者可以回复 `@loom 通过`，或用 `@loom <反馈>` 请求修订。新版方案发布后需要重新批准，草稿 PR 仍需单独获得发布授权。
 - **沙箱执行，验证后交付。** Agent 只在预先获准的文件范围内修改代码。Worker 运行本地检查，验证通过后保存补丁。
-- **进度和结果可追踪。** 控制台汇总任务阶段、草稿 PR 和对应提交的 CI 结果，也可发起运行请求。
+- **进度和结果可追踪。** 控制台记录阶段输入输出、草稿 PR 和对应提交的 CI 结果，并根据修复次数、耗时和失败记录提供审计建议。
+
+## 控制台
+
+使用 GitHub 登录后，仓库授权者可以创建、启动、暂停和排空自己的 Worker。Worker 可并行推进不同 Issue，同一个 Issue 同时只有一个 Worker 处理。能力页展示 AgentGateway 模型、MCP 工具和已配置的 SkillHub 技能版本。
 
 ## 系统架构
 
@@ -43,8 +48,8 @@ flowchart LR
         caddy -->|Webhook| controller
         caddy -->|控制台请求| console
         controller -->|登记任务、授权和 CI 结果| db
-        console -->|读取状态、提交运行请求| db
-        db <-->|领取任务、记录进度| worker
+        console -->|查看执行记录、管理 Worker| db
+        db <-->|独占领取 Issue、记录输入输出| worker
         worker <-->|规划、编码和修复| sandbox
         sandbox -->|模型请求| gateway
     end
@@ -57,7 +62,7 @@ flowchart LR
     gateway --> deepseek
 ```
 
-Controller 接收签名 Webhook，并轮询已配置的 GitHub Issue。Worker 通过 SQLite 领取任务、记录阶段，并将 OpenCode 的模型请求交由 AgentGateway 转发给 DeepSeek。方案评论与草稿 PR 通过 GitHub App 发布。
+Controller 接收签名 Webhook，并轮询已配置的 GitHub Issue。Worker 管理进程在同一主机上并行调度实例。各实例通过 SQLite 独占领取 Issue，使用独立沙箱执行，并将 OpenCode 的模型请求交由 AgentGateway 转发。方案评论与草稿 PR 通过 GitHub App 发布。
 
 ## 部署
 

@@ -4,9 +4,18 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
-from urllib.parse import urlsplit
+import sys
+from urllib.parse import parse_qs, urlsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import capabilities
+import oauth
+import telemetry
+import worker_registry
 
 ASSETS = Path(__file__).resolve().parent
 DB = Path(os.environ.get("LOOM_DB", "/opt/loom/data/workflow.sqlite"))
@@ -86,9 +95,29 @@ class Handler(BaseHTTPRequestHandler):
         hostname = host.partition(":")[0]
         if hostname in {"127.0.0.1", "localhost"}:
             return f"http://{host}"
-        if host == "ai.anyhub.cn":
-            return f"https://{host}"
+        if host == urlsplit(oauth.ORIGIN).netloc:
+            return oauth.ORIGIN
         return None
+
+    def log_request(self, code="-", size="-"):
+        if urlsplit(self.path).path != "/oauth/callback":
+            super().log_request(code, size)
+
+    def redirect(self, location, *cookies):
+        self.send_response(303)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        for cookie in cookies:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+
+    def user(self):
+        session = oauth.cookie_value(self.headers.get("Cookie", ""), "loom_session")
+        return oauth.sessions.get(session)
+
+    def local(self):
+        return self.expected_origin() == "http://" + self.headers.get("Host", "")
 
     def send_body(self, status, content_type, body):
         self.send_response(status)
@@ -109,6 +138,64 @@ class Handler(BaseHTTPRequestHandler):
             self.send_body(403, "text/plain; charset=utf-8", b"Forbidden")
             return
         path = urlsplit(self.path).path
+        if path in {"/oauth/login", "/oauth/callback"}:
+            if not oauth.ENABLED or self.expected_origin() != oauth.ORIGIN or self.command != "GET":
+                self.respond(404, "not_found")
+                return
+            if path == "/oauth/login":
+                self.redirect(*oauth.begin())
+                return
+            query = parse_qs(urlsplit(self.path).query)
+            try:
+                cookies = oauth.finish(query.get("state", [None])[0],
+                    oauth.cookie_value(self.headers.get("Cookie", ""), "loom_oauth_state"),
+                    query.get("code", [None])[0])
+            except PermissionError:
+                self.respond(403, "repository_access_required")
+            except (ValueError, OSError):
+                self.respond(400, "github_login_failed")
+            else:
+                self.redirect("/console/", *cookies)
+            return
+        user = self.user()
+        if path == "/api/session":
+            self.json_response(200, {"enabled": oauth.ENABLED, "user": user})
+            return
+        if path.startswith("/api/") and not user and not (
+                self.local() and not path.startswith("/api/workers")):
+            self.respond(401, "login_required")
+            return
+        if path == "/api/capabilities":
+            result = capabilities.snapshot()
+            for entry in result["skills"]["items"]:
+                try:
+                    capabilities.skill_files([entry])
+                except (OSError, ValueError):
+                    entry["installed"] = False
+                else:
+                    entry["installed"] = True
+            self.json_response(200, result)
+            return
+        match = re.fullmatch(r"/api/executions/([1-9][0-9]{0,15})", path)
+        if path == "/api/audit" or match:
+            try:
+                with closing(sqlite3.connect(DB.resolve().as_uri() + "?mode=ro", uri=True, timeout=3)) as db:
+                    value = telemetry.timeline(db, int(match[1])) if match else telemetry.audit(db)
+            except sqlite3.Error:
+                self.respond(503, "unavailable")
+                return
+            if value is None:
+                self.respond(404, "not_found")
+            else:
+                self.json_response(200, value)
+            return
+        if path == "/api/workers":
+            try:
+                with closing(self.registry_db()) as db:
+                    self.json_response(200, worker_registry.list_workers(db, user["id"]))
+            except sqlite3.Error:
+                self.respond(503, "unavailable")
+            return
         if path == "/api/snapshot":
             try:
                 body = json.dumps(snapshot(), ensure_ascii=False).encode()
@@ -129,13 +216,65 @@ class Handler(BaseHTTPRequestHandler):
 
     do_HEAD = do_GET
 
+    def registry_db(self):
+        return sqlite3.connect(DB.resolve().as_uri() + "?mode=rw", uri=True, timeout=3)
+
+    def worker_action(self, path, user):
+        if not user:
+            self.respond(401, "login_required")
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 4096 or self.headers.get_content_type() != "application/json":
+                raise ValueError("Invalid request")
+            body = json.loads(self.rfile.read(length))
+            if not isinstance(body, dict):
+                raise ValueError("Invalid request")
+            with closing(self.registry_db()) as db:
+                if path == "/api/workers":
+                    worker = worker_registry.create_worker(db, user["id"], body.get("name"),
+                        body.get("issue_number"), body.get("model"), body.get("skills", ()))
+                else:
+                    worker_id = body.get("id")
+                    if not isinstance(worker_id, str) or not re.fullmatch(r"[0-9a-f]{32}", worker_id):
+                        raise ValueError("Invalid worker ID")
+                    worker = worker_registry.set_worker_state(db, user["id"], worker_id, body.get("state"))
+        except capabilities.ModelCatalogUnavailable:
+            self.respond(503, "model_catalog_unavailable")
+            return
+        except capabilities.ModelUnavailable:
+            self.respond(400, "model_not_available")
+            return
+        except (TypeError, ValueError):
+            self.respond(400, "invalid_request")
+            return
+        except sqlite3.Error:
+            self.respond(503, "unavailable")
+            return
+        if worker is None:
+            self.respond(404, "not_found")
+        else:
+            self.json_response(201 if path == "/api/workers" else 200, worker)
+
     def do_POST(self):
-        if urlsplit(self.path).path != "/api/run":
+        path = urlsplit(self.path).path
+        if path not in {"/api/run", "/api/workers", "/api/workers/state", "/oauth/logout"}:
             self.respond(404, "not_found")
             return
         origin = self.expected_origin()
         if origin is None or self.headers.get("Origin") != origin:
             self.respond(403, "invalid_origin")
+            return
+        user = self.user()
+        if path == "/oauth/logout":
+            oauth.sessions.get(oauth.cookie_value(self.headers.get("Cookie", ""), "loom_session"), consume=True)
+            self.redirect("/console/", oauth.cookie("loom_session", "", 0))
+            return
+        if path.startswith("/api/workers"):
+            self.worker_action(path, user)
+            return
+        if not user and not self.local():
+            self.respond(401, "login_required")
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -175,8 +314,11 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.respond(409, "not_runnable")
 
+    def json_response(self, status, value):
+        self.send_body(status, "application/json; charset=utf-8", json.dumps(value, ensure_ascii=False).encode())
+
     def respond(self, status, code):
-        self.send_body(status, "application/json", json.dumps({"status": code}).encode())
+        self.json_response(status, {"status": code})
 
 
 if __name__ == "__main__":

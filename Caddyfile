@@ -28,10 +28,8 @@ ai.anyhub.cn {
 
 	redir /console /console/ 308
 	handle_path /console/* {
-		basic_auth {
-			import /etc/caddy/console-users.caddy
-		}
 		reverse_proxy 127.0.0.1:8790 {
+			header_up Host {host}
 			header_up -Authorization
 		}
 	}

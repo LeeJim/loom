@@ -41,3 +41,50 @@ MCP and the base sandbox image) are administered separately.
 On failed health checks, the rollout restores the prior Controller and service
 overrides. If a workflow execution is active, it exits before changing the
 running services. The server retains the release source keyed by commit SHA.
+
+## Console GitHub OAuth
+
+Create a GitHub OAuth App with the Console URL as its homepage and
+`https://ai.anyhub.cn/console/oauth/callback` as its authorization callback.
+Provide `LOOM_GITHUB_OAUTH_CLIENT_ID` and `LOOM_GITHUB_OAUTH_CLIENT_SECRET`
+through a protected environment file for `loom-console.service`. If using a
+different HTTPS hostname, set `LOOM_CONSOLE_ORIGIN` to that origin and update
+the OAuth callback and Caddy hostname to match.
+
+The Console lets GitHub users with write access to the target repository sign
+in. Worker management is scoped to the authenticated user's GitHub ID. The
+Console does not retain GitHub user access tokens after login. Sessions expire
+after one hour or when the Console restarts.
+
+Install the updated Caddy configuration separately from application rollout.
+Test the OAuth callback through Caddy after configuring the service. Public
+Console data requires an OAuth session. The loopback snapshot remains available
+to the local rollout health check.
+
+## Worker and capability configuration
+
+One supervisor per host manages the workers created in Console. Set
+`LOOM_MAX_PARALLEL_WORKERS` on `loom-worker.service` to cap active Issue
+claims. The default is two. Each Issue can have only one active claim.
+Until the first Console Worker is created, the supervisor runs the existing
+execution profiles through an implicit Worker. After creating a Worker, start
+it in Console to process those profiles. An Issue-specific Worker must select
+an existing profile.
+
+Set `LOOM_GATEWAY_STATUS_URL` on the Console service to the gateway's OpenAI
+API base URL. It defaults to `http://127.0.0.1:4000/v1`. Set
+`LOOM_MCP_STATUS_URL` to the full private MCP gateway endpoint reachable from
+the Console service, for example `http://127.0.0.1:3000/mcp` when an
+operator has configured a loopback listener. OpenCode uses the sandbox
+gateway at `http://gateway:4000/v1` by default. Keep its sandbox network
+internal and keep upstream model credentials on the gateway.
+
+For SkillHub, set `LOOM_SKILLHUB_CATALOG` on the Console service to an
+operator-configured HTTPS endpoint or local JSON manifest. The catalog
+accepts `{"skills":[{"id":"example","version":"1.0","description":"Example skill"}]}`.
+If the endpoint requires a bearer token, set `LOOM_SKILLHUB_TOKEN` in the
+protected environment file. Install reviewed, pinned versions at
+`<skills-directory>/<id>/<version>/SKILL.md`. The skills directory defaults
+to `/opt/loom/skills`; use the same `LOOM_SKILLHUB_SKILLS_DIR` on both
+services if you change it. Only installed versions can be assigned to a
+Worker, and they are mounted read-only.
