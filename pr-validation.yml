@@ -1,4 +1,4 @@
-name: ai-native draft validation
+name: loom draft validation
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ jobs:
     if: >-
       github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'codex/ai-native-issue-')
+      startsWith(github.event.pull_request.head.ref, 'codex/loom-issue-')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:

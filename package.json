@@ -1,5 +1,5 @@
 {
-  "name": "ai-native-controller",
+  "name": "loom-controller",
   "private": true,
   "type": "module",
   "engines": {"node": ">=22.13"},

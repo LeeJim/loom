@@ -3,7 +3,7 @@ services:
     image: cr.agentgateway.dev/agentgateway:v1.7.0
     command: ["-f", "/etc/agentgateway/config.yaml"]
     env_file:
-      - path: /opt/ai-native/secrets/gateway.env
+      - path: /opt/loom/secrets/gateway.env
         required: false
     volumes:
       - ./gateway.yaml:/etc/agentgateway/config.yaml:ro

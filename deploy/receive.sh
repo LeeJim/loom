@@ -7,7 +7,7 @@ unset CDPATH BASH_ENV ENV GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
 read -r requested
 [[ "$requested" =~ ^[a-f0-9]{40}$ ]]
 
-root=/opt/ai-native
+root=/opt/loom
 releases="$root/loom-releases"
 install -d -o root -g root -m 0755 "$releases"
 exec 9>"$releases/.lock"

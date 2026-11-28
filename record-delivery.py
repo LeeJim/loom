@@ -12,7 +12,7 @@ if min(args.issue, args.pr) < 1 or not re.fullmatch(r"[0-9a-f]{40}", args.head_s
     parser.error("Expected positive Issue and PR numbers and a full commit SHA")
 url = f"https://github.com/LeeJim/HowToCookOnMiniprogram/pull/{args.pr}"
 receipt = (args.pr, url, args.head_sha)
-with sqlite3.connect("file:/opt/ai-native/data/workflow.sqlite?mode=rw", uri=True) as db:
+with sqlite3.connect("file:/opt/loom/data/workflow.sqlite?mode=rw", uri=True) as db:
     db.execute("PRAGMA foreign_keys=ON")
     db.execute("BEGIN IMMEDIATE")
     state = db.execute("SELECT stage FROM jobs WHERE number=?", (args.issue,)).fetchone()

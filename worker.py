@@ -159,11 +159,11 @@ def main():
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     os.umask(0o027)
-    data = Path(os.environ.get("AI_NATIVE_DATA", ROOT / "data"))
-    approved = os.environ.get("AI_NATIVE_WORKER_ISSUE", "")
+    data = Path(os.environ.get("LOOM_DATA", ROOT / "data"))
+    approved = os.environ.get("LOOM_WORKER_ISSUE", "")
     handlers = {13: run} if approved == "13" else {}
     allowed_files = {13: ("README.md",)} if handlers else {}
-    config = os.environ.get("AI_NATIVE_CODE_PROFILES")
+    config = os.environ.get("LOOM_CODE_PROFILES")
     if config:
         profiles = json.loads(Path(config).read_text())
         if not isinstance(profiles, dict):
@@ -174,9 +174,9 @@ def main():
             allowed_files[int(number)] = check_paths(paths)
             handlers[int(number)] = partial(run, files=allowed_files[int(number)])
     if not handlers:
-        parser.error("AI_NATIVE_WORKER_ISSUE must select a configured execution profile")
-    policy = os.environ.get("AI_NATIVE_PUBLISH_ISSUES")
-    app_config = Path(os.environ.get("AI_NATIVE_GITHUB_APP_CONFIG", DEFAULT_CONFIG))
+        parser.error("LOOM_WORKER_ISSUE must select a configured execution profile")
+    policy = os.environ.get("LOOM_PUBLISH_ISSUES")
+    app_config = Path(os.environ.get("LOOM_GITHUB_APP_CONFIG", DEFAULT_CONFIG))
     static_publish = {}
     if policy:
         for number in policy.split(","):

@@ -92,7 +92,7 @@ const recordAttempt = db.prepare(`
 `);
 const outcomes = new Set(['success', 'failure', 'cancelled', 'timed_out', 'skipped', 'neutral',
   'action_required', 'stale', 'startup_failure']);
-const prWorkflow = '.github/workflows/ai-native-pr-validation.yml';
+const prWorkflow = '.github/workflows/loom-pr-validation.yml';
 const savePendingCi = db.prepare(`
   INSERT INTO pending_pr_ci (delivery_id, run_id, attempt, pr_number, head_sha, conclusion)
   VALUES (?, ?, ?, ?, ?, ?)
@@ -194,7 +194,7 @@ app.post('/webhooks/github', bodyLimit({ maxSize: 1024 * 1024 }), async (c) => {
     const duplicate = recordDelivery.run(delivery, event).changes === 0;
     const queued = Boolean(!duplicate && eligible
       && enqueue.run(issue.number, issue.title, issue.body ?? '').changes);
-    const label = payload.label?.name === 'ai-native:publish';
+    const label = payload.label?.name === 'loom:publish';
     if (!duplicate && knownIssue && typeof issue.updated_at === 'string'
       && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(issue.updated_at)) {
       if ((label && payload.action === 'unlabeled') || payload.action === 'closed') {

@@ -17,7 +17,7 @@ if min(args.issue, args.run) < 1 or any(
 
 url = f"https://github.com/LeeJim/HowToCookOnMiniprogram/actions/runs/{args.run}"
 receipt = (args.run, args.issue, args.pr_head, args.workflow_head, args.conclusion, url)
-with sqlite3.connect("file:/opt/ai-native/data/workflow.sqlite?mode=rw", uri=True) as db:
+with sqlite3.connect("file:/opt/loom/data/workflow.sqlite?mode=rw", uri=True) as db:
     db.execute("PRAGMA foreign_keys=ON")
     db.execute("BEGIN IMMEDIATE")
     head = db.execute(

@@ -1,8 +1,8 @@
-name: ai-native Issue 13 cloud validation
+name: loom Issue 13 cloud validation
 
 on:
   push:
-    branches: [codex/ai-native-ci-validation]
+    branches: [codex/loom-ci-validation]
 
 permissions:
   contents: read

@@ -5,7 +5,7 @@ The workflow validates proposed changes without deployment credentials. A push t
 the workflow on `main` if a running task deferred rollout.
 
 The initial rollout manages the Controller, Worker and console on the existing
-ai-native host. Their SQLite database, systemd policy drop-ins, and credential
+loom host. Their SQLite database, systemd policy drop-ins, and credential
 files stay on the host. Routing and base infrastructure (Caddy, AgentGateway,
 MCP and the base sandbox image) are administered separately.
 

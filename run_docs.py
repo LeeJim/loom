@@ -8,11 +8,11 @@ import re
 import subprocess
 import tempfile
 
-ROOT = Path("/opt/ai-native")
-NETWORK = "ai-native-sandbox"
+ROOT = Path("/opt/loom")
+NETWORK = "loom-sandbox"
 REPO = "https://github.com/LeeJim/HowToCookOnMiniprogram.git"
-IMAGE = "ai-native-opencode:1.19.6"
-CONTAINER = "ai-native-worker-sandbox"
+IMAGE = "loom-opencode:1.19.6"
+CONTAINER = "loom-worker-sandbox"
 
 
 def command(*args, cwd=None, timeout=120, env=None):
@@ -34,13 +34,13 @@ def agent(work, prompt, edit=False):
     }
     stale = command(
         "docker", "ps", "-aq", "--filter", f"name=^{CONTAINER}$",
-        "--filter", "label=ai-native.role=workflow-worker",
+        "--filter", "label=loom.role=workflow-worker",
     ).strip()
     if stale:
         command("docker", "rm", "-f", stale, timeout=20)
     return command(
         "docker", "run", "--rm", "--name", CONTAINER,
-        "--label", "ai-native.role=workflow-worker",
+        "--label", "loom.role=workflow-worker",
         "--network", NETWORK, "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges", "--read-only", "--tmpfs",
         "/tmp:rw,nosuid,nodev,size=128m", "--memory", "512m", "--cpus", "1",
