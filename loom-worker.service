@@ -1,5 +1,5 @@
 [Unit]
-Description=loom SQLite Workflow Worker
+Description=Loom agent-driven development worker
 After=docker.service
 Requires=docker.service
 
