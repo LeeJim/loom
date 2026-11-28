@@ -84,7 +84,7 @@ class IssuePlanTests(unittest.TestCase):
     def test_post_uses_issue_token_and_existing_receipt_does_not_mint_it(self):
         self.db.execute("UPDATE issue_plans SET state='posting',posted_at=NULL,comment_url=NULL")
         posted = comment(21, "<!-- loom-plan:v1 -->")
-        posted["user"]["login"] = plans.BOT
+        posted["user"] = {"id": 123, "login": "renamed-loom[bot]", "type": "Bot"}
         posted["html_url"] = "https://example.org/#issuecomment-21"
         calls = []
 
@@ -96,11 +96,15 @@ class IssuePlanTests(unittest.TestCase):
                 return posted
             return self.github(token, path)
 
-        with patch.object(plans, "installation_token", side_effect=["read", "write", "read"]) as token:
+        with (
+            patch.object(plans, "bot_user_id", return_value=123),
+            patch.object(plans, "installation_token", side_effect=["read", "write", "read"]) as token,
+        ):
             with patch.object(plans, "api", github):
                 self.assertIsNone(plans.review(self.db, 1, ("README.md",), None))
                 self.db.execute("UPDATE issue_plans SET state='posting',next_check=0")
-                self.comments = [posted]
+                spoof = {**posted, "id": 22, "user": {"id": 999, "login": posted["user"]["login"], "type": "Bot"}}
+                self.comments = [spoof, {**posted, "user": {**posted["user"], "login": "previous-name[bot]"}}]
                 self.assertIsNone(plans.review(self.db, 1, ("README.md",), None))
             self.assertEqual(token.call_args_list[1].kwargs, {"permissions": plans.ISSUE_COMMENT_PERMISSIONS})
         self.assertEqual(len(calls), 1)

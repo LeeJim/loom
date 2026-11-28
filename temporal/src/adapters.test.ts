@@ -23,11 +23,11 @@ test("approval binds to the most recent bot plan older than the comment", async 
   const draft = (id: number, version: number): GitHubComment => ({
     id, body: planMarker(version) + "\nplan", html_url: "https://example.test/",
     created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z",
-    user: { id: 10, login: "loom[bot]", type: "Bot" },
+    user: { id: 10, login: "previous-loom[bot]", type: "Bot" },
   });
   const approved = { ...draft(20, 1), body: "@loom 通过", user: { id: 50, login: "maintainer", type: "User" } };
   const github = {
-    bot: "loom[bot]",
+    botUserId: async () => 10,
     async *comments() { yield draft(30, 2); yield draft(10, 1); },
     authorized: async (user: GitHubComment["user"]) => user.id === 50,
   };
@@ -72,12 +72,12 @@ test("plan comment retry finds the existing Bot-authored receipt", async () => {
   const directory = await mkdtemp(join(tmpdir(), "loom-comment-test-"));
   const recorded: GitHubComment[] = [];
   const github = {
-    bot: "loom[bot]",
+    botUserId: async () => 42,
     issuePath: () => "/issues/1",
     async *comments() { yield* recorded; },
-    async repo(_path: string, payload: { body: string }): Promise<GitHubComment> {
+    async postIssueComment(_issue: unknown, body: string): Promise<GitHubComment> {
       const comment = {
-        id: 100, body: payload.body, html_url: "https://example.test/issuecomment-100",
+        id: 100, body, html_url: "https://example.test/issuecomment-100",
         created_at: "", updated_at: "", user: { id: 42, type: "Bot", login: "loom[bot]" },
       };
       recorded.push(comment);

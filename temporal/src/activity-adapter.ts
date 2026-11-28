@@ -143,21 +143,21 @@ export function pilotActivities(options: PilotOptions): Activities {
     postPlan: async (issue, plan) => {
       allowed(issue);
       const marker = planMarker(plan.version);
+      const botId = await github.botUserId();
       let receipt: GitHubComment | undefined;
       for await (const comment of github.comments(issue)) {
-        if (planVersion(comment, github.bot) === plan.version) {
+        if (planVersion(comment, botId) === plan.version) {
           receipt = comment;
           break;
         }
       }
       if (!receipt) {
         const text = (await artifacts.read(plan.artifact)).toString().replaceAll("```", "'''");
-        receipt = await github.repo<GitHubComment>(`${github.issuePath(issue)}/comments`, {
-          body: `${marker}\n## Loom 实现方案 · ${plan.version}\n\n\`\`\`text\n${text}\n\`\`\`\n\n` +
-            "请回复 `@loom 通过` 批准本版，或回复 `@loom <反馈>` 请求修订。",
-        });
+        receipt = await github.postIssueComment(issue,
+          `${marker}\n## Loom 实现方案 · ${plan.version}\n\n\`\`\`text\n${text}\n\`\`\`\n\n` +
+            "请回复 `@loom 通过` 批准本版，或回复 `@loom <反馈>` 请求修订。");
       }
-      if (planVersion(receipt, github.bot) !== plan.version) throw new Error("Unverified GitHub plan receipt");
+      if (planVersion(receipt, botId) !== plan.version) throw new Error("Unverified GitHub plan receipt");
       return { commentId: receipt.id, url: receipt.html_url };
     },
     recheckApproval: async (issue, plan, published, approval: Directive) => {

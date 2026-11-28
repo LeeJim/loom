@@ -6,7 +6,7 @@ import re
 import time
 from urllib.error import HTTPError, URLError
 
-from github_app import MissingIssueWritePermission
+from github_app import BotIdentityError, MissingIssueWritePermission
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS plan_retry_state (
@@ -69,6 +69,8 @@ def classify(error, now):
         return "network", None, None, None
     if isinstance(error, MissingIssueWritePermission):
         return "issues_write_required", None, None, None
+    if isinstance(error, BotIdentityError):
+        return "bot_identity_mismatch", None, None, None
     return "operation_error", None, None, None
 
 

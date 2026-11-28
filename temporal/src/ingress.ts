@@ -13,14 +13,14 @@ export const planMarker = (version: number) => `<!-- loom-temporal-plan:${versio
 const markerPattern = /^<!-- loom-temporal-plan:([1-9]\d*) -->\r?\n/;
 const commandPattern = /^@loom\s+(\S[\s\S]*)$/;
 
-export function planVersion(comment: GitHubComment, bot: string): number | undefined {
-  if (comment.user.login !== bot || comment.user.type !== "Bot") return undefined;
+export function planVersion(comment: GitHubComment, botId: number): number | undefined {
+  if (comment.user.id !== botId || comment.user.type !== "Bot") return undefined;
   const value = Number(markerPattern.exec(comment.body)?.[1]);
   return Number.isSafeInteger(value) ? value : undefined;
 }
 
 export async function issueDirective(
-  github: Pick<GitHub, "comments" | "authorized" | "bot">,
+  github: Pick<GitHub, "comments" | "authorized" | "botUserId">,
   issue: Issue,
   comment: GitHubComment,
   delivery: string,
@@ -29,11 +29,12 @@ export async function issueDirective(
       comment.created_at !== comment.updated_at || !commandPattern.test(comment.body.trim()) ||
       !await github.authorized(comment.user)) return undefined;
 
+  const botId = await github.botUserId();
   let version: number | undefined;
   let latestId = 0;
   for await (const posted of github.comments(issue)) {
     if (posted.id < comment.id && posted.id > latestId && posted.created_at <= comment.created_at) {
-      const candidate = planVersion(posted, github.bot);
+      const candidate = planVersion(posted, botId);
       if (candidate !== undefined) {
         latestId = posted.id;
         version = candidate;
