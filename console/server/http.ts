@@ -7,9 +7,10 @@ import {
   audit, createWorker, defaultDb, InvalidRequest, positiveInt, queueRun, setWorkerState,
   snapshot, temporalActivities, timeline, validateWorker, withDb, workers,
 } from "./data.js";
+import { logFilters, recentLogs } from "./logs.js";
 import { OAuth, OAuthError } from "./oauth.js";
 
-const fallbackRoutes = new Set(["/", "/tasks", "/executions", "/workers", "/capabilities", "/audit"]);
+const fallbackRoutes = new Set(["/", "/tasks", "/executions", "/workers", "/capabilities", "/audit", "/logs"]);
 const staticRoot = fileURLToPath(new URL("../web/", import.meta.url));
 const headers = {
   "Cache-Control": "no-store",
@@ -79,7 +80,13 @@ export function consoleServer({
       if (get && path === "/api/session") return json(200, { enabled: oauth.enabled, user: user ?? null });
       if (path.startsWith("/api/")) {
         if (!user && (!local || path.startsWith("/api/workers"))) return fail(401, "login_required");
-        if (get && path === "/api/snapshot") return json(200, withDb(database, true, snapshot));
+        if (get && path === "/api/snapshot") {
+          if (url.searchParams.get("view") === "logs") {
+            const filters = logFilters(url.searchParams);
+            return json(200, withDb(database, true, db => recentLogs(db, filters, user?.id, temporalDb)));
+          }
+          return json(200, withDb(database, true, snapshot));
+        }
         if (get && path === "/api/capabilities") return json(200, await capabilities());
         if (get && path === "/api/audit") return json(200, withDb(database, true, audit));
         if (get && path === "/api/temporal/activities") return json(200, temporalActivities(temporalDb));
@@ -98,7 +105,7 @@ export function consoleServer({
           if (!user) return fail(401, "login_required");
           if (!positiveInt(input.issue)) throw new InvalidRequest();
           const issue = input.issue;
-          return withDb(database, false, db => queueRun(db, issue))
+          return withDb(database, false, db => queueRun(db, issue, user.id))
             ? fail(202, "queued") : fail(409, "not_runnable");
         }
         if (path === "/api/workers") {
