@@ -73,3 +73,5 @@ TypeScript 试点通过 Temporal 编排方案审批、沙箱执行和交付。�
 ## 部署
 
 生产部署由 GitHub Actions 在变更合并到 `main` 后触发。首次配置见[部署流水线说明](deploy/README.md)。
+
+失败重试、指数退避和人工恢复见[失败重试实践](docs/retry-policy.md)。

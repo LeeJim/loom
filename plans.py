@@ -10,7 +10,7 @@ import time
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
-from github_app import REPOSITORY, api, installation_token
+from github_app import ISSUE_COMMENT_PERMISSIONS, REPOSITORY, api, installation_token
 from run_docs import REPO, ROOT, agent, command, source
 import telemetry
 
@@ -148,7 +148,8 @@ def review(db, number, paths, app_config):
                         if item["user"]["login"] == BOT and marker in item["body"]), None)
         if comment is None:
             safe_plan = plan.replace("```", "'''")
-            comment = api(token, endpoint + "/comments", body={"body": (
+            comment_token = installation_token(app_config, permissions=ISSUE_COMMENT_PERMISSIONS)
+            comment = api(comment_token, endpoint + "/comments", body={"body": (
                 f"{marker}\n## Loom 实现方案\n\n版本：`{plan_id}`\n\n"
                 f"允许修改：{', '.join(paths)}\n\n"
                 f"```text\n{safe_plan}\n```\n\n"
