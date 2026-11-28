@@ -4,7 +4,7 @@
   "scripts": {
     "test": "npm run build && node --test dist/*.test.js",
     "build": "tsc -p tsconfig.json",
-    "pilot:controller": "node dist/pilot-controller.js",
+    "pilot:webhook": "node dist/github-webhook.js",
     "pilot:worker": "node dist/pilot-worker.js",
     "pilot:start": "node dist/pilot-start.js"
   },

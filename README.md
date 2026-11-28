@@ -28,7 +28,7 @@ flowchart TD
 
 使用 GitHub 登录后，仓库授权者可以创建、启动、暂停和排空自己的 Worker。Worker 可并行推进不同 Issue，同一个 Issue 同时只有一个 Worker 处理。能力页展示 AgentGateway 模型、MCP 工具和已配置的 SkillHub 技能版本。
 
-## 系统架构
+## 当前生产架构
 
 ```mermaid
 flowchart LR
@@ -66,7 +66,22 @@ Controller 接收签名 Webhook，并轮询已配置的 GitHub Issue。Worker �
 
 ## Temporal 试点
 
-TypeScript 试点通过 Temporal 编排方案审批、沙箱执行和交付。在隔离环境运行和验收的步骤见 [试点说明](temporal/README.md)。
+**目标架构由 Temporal 接管编排。** Loom 保留一个轻量的 GitHub Webhook 入口，负责验签、校验授权、持久化接收和投递。Temporal 维护每个 Issue 的流程状态，决定何时修订方案、等待审批、执行、交付和处理 CI。
+
+```mermaid
+flowchart LR
+    gh["GitHub"] -->|"Issue 评论、发布授权、CI"| hook["Loom Webhook 入口"]
+    hook --> outbox[("待投递事件")]
+    outbox --> temporal["Temporal · 每个 Issue 一个 Workflow"]
+    temporal --> worker["TypeScript Worker"]
+    worker --> sandbox["OpenCode 沙箱"]
+    sandbox --> gateway["AgentGateway"]
+    worker -->|方案评论、草稿 PR| gh
+    worker --> records[("执行记录与产物")]
+    records --> console["Loom Console"]
+```
+
+生产切换前，先验证试点事件链路，并确保每个 Issue 只由一套引擎推进。待旧任务结束、健康检查和查询调用迁移后，再退役旧 Controller。运行与验收步骤见[试点说明](temporal/README.md)。
 
 ## 部署
 
