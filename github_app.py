@@ -8,6 +8,7 @@ import re
 import stat
 import subprocess
 import time
+from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 REPOSITORY = "LeeJim/HowToCookOnMiniprogram"
@@ -17,6 +18,10 @@ ISSUE_COMMENT_PERMISSIONS = {"issues": "write"}
 
 
 class MissingIssueWritePermission(ValueError):
+    pass
+
+
+class BotIdentityError(ValueError):
     pass
 
 
@@ -58,7 +63,7 @@ def app_jwt(app_id, key_path):
     return (message + b"." + encode(signed.stdout)).decode("ascii")
 
 
-def installation_token(config_path, *, permissions=PERMISSIONS):
+def configured_app_jwt(config_path):
     config = json.loads(Path(config_path).read_text())
     app_id = str(config["app_id"])
     if not re.fullmatch(r"[1-9][0-9]*", app_id):
@@ -66,7 +71,22 @@ def installation_token(config_path, *, permissions=PERMISSIONS):
     key_path = Path(config["private_key_file"])
     if not key_path.is_absolute():
         raise ValueError("GitHub App private key path must be absolute")
-    jwt = app_jwt(app_id, key_path)
+    return app_jwt(app_id, key_path)
+
+
+def bot_user_id(config_path, token):
+    app = api(configured_app_jwt(config_path), "/app")
+    slug = app.get("slug")
+    if not isinstance(slug, str) or not re.fullmatch(r"[A-Za-z0-9-]{1,100}", slug):
+        raise BotIdentityError("GitHub App has no valid slug")
+    account = api(token, "/users/" + quote(slug + "[bot]", safe=""))
+    if account.get("type") != "Bot" or type(account.get("id")) is not int or account["id"] <= 0:
+        raise BotIdentityError("GitHub App bot account has no valid user ID")
+    return account["id"]
+
+
+def installation_token(config_path, *, permissions=PERMISSIONS):
+    jwt = configured_app_jwt(config_path)
     installation = api(jwt, f"/repos/{REPOSITORY}/installation")
     if permissions == ISSUE_COMMENT_PERMISSIONS and installation.get("permissions", {}).get("issues") != "write":
         raise MissingIssueWritePermission("GitHub App installation requires Issues: write")

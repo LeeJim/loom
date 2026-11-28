@@ -10,11 +10,10 @@ import time
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 
-from github_app import ISSUE_COMMENT_PERMISSIONS, REPOSITORY, api, installation_token
+from github_app import BotIdentityError, ISSUE_COMMENT_PERMISSIONS, REPOSITORY, api, bot_user_id, installation_token
 from run_docs import REPO, ROOT, agent, command, source
 import telemetry
 
-BOT = "leejim-ainative[bot]"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS issue_plans (
     issue_number INTEGER PRIMARY KEY, plan_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
@@ -143,9 +142,16 @@ def review(db, number, paths, app_config):
     plan_id, _, _, _, base, plan, posted_at, state, _, comment_url = row
     if state == "posting":
         marker = f"<!-- loom-plan:{plan_id} -->"
-        comments = issue_comments(token, endpoint)
-        comment = next((item for item in comments
-                        if item["user"]["login"] == BOT and marker in item["body"]), None)
+        bot = bot_user_id(app_config, token)
+
+        def authentic(item):
+            author = item.get("user") or {}
+            return author.get("type") == "Bot" and author.get("id") == bot
+
+        def matches(item):
+            return authentic(item) and (item.get("body") or "").splitlines()[:1] == [marker]
+
+        comment = next((item for item in issue_comments(token, endpoint) if matches(item)), None)
         if comment is None:
             safe_plan = plan.replace("```", "'''")
             comment_token = installation_token(app_config, permissions=ISSUE_COMMENT_PERMISSIONS)
@@ -156,8 +162,8 @@ def review(db, number, paths, app_config):
                 "如同意本版方案，请回复 `@loom 通过`。如需调整，请回复 `@loom <反馈>`。\n"
                 "收到确认后才会修改代码。草稿 PR 的发布仍使用 `loom:publish` 标签。"
             )})
-        if comment["user"]["login"] != BOT:
-            raise ValueError("Plan comment was not authored by the GitHub App")
+        if not matches(comment):
+            raise BotIdentityError("Plan comment was not authored by the configured GitHub App")
         with db:
             db.execute("""UPDATE issue_plans SET state='awaiting_review',posted_at=?,comment_url=?,
                           next_check=?,error=NULL WHERE issue_number=?""",

@@ -14,7 +14,7 @@ export async function pilotConfig() {
   const data = required("LOOM_TEMPORAL_DATA");
   const key = required("LOOM_GITHUB_APP_CONFIG");
   if (![profilePath, workspace, data, key].every(isAbsolute)) throw new Error("Pilot paths must be absolute");
-  const github = new GitHub(required("LOOM_TEMPORAL_REPOSITORY"), key, required("LOOM_TEMPORAL_GITHUB_BOT"));
+  const github = new GitHub(required("LOOM_TEMPORAL_REPOSITORY"), key);
   const profiles = new Map<number, readonly string[]>();
   for (const [number, paths] of Object.entries(JSON.parse(await readFile(profilePath, "utf8")))) {
     if (!/^[1-9]\d*$/.test(number) || !Number.isSafeInteger(Number(number)) ||

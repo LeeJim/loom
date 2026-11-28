@@ -17,8 +17,8 @@ export class GitHubError extends Error {
 }
 
 export class GitHub {
-  private token?: { value: string; expires: number };
-  constructor(readonly repository: string, private readonly config: string, readonly bot: string) {
+  private tokens = new Map<"delivery" | "issues", { value: string; expires: number }>();
+  constructor(readonly repository: string, private readonly config: string) {
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error("Invalid GitHub repository");
   }
 
@@ -44,8 +44,7 @@ export class GitHub {
     return await response.json() as T;
   }
 
-  async installationToken(): Promise<string> {
-    if (this.token && this.token.expires > Date.now() + 60_000) return this.token.value;
+  private async appJwt(): Promise<string> {
     const config = JSON.parse(await readFile(this.config, "utf8")) as { app_id: number | string; private_key_file: string };
     const key = config.private_key_file;
     if (!/^[1-9]\d*$/.test(String(config.app_id)) || !isAbsolute(key)) throw new Error("Invalid GitHub App configuration");
@@ -56,9 +55,29 @@ export class GitHub {
     const payload = Buffer.from(JSON.stringify({ iat: now - 60, exp: now + 540, iss: String(config.app_id) })).toString("base64url");
     const input = `${header}.${payload}`;
     const signature = createSign("RSA-SHA256").update(input).sign(await readFile(key), "base64url");
-    const jwt = `${input}.${signature}`;
+    return `${input}.${signature}`;
+  }
+
+  async botUserId(): Promise<number> {
+    const app = await this.request<{ slug: string }>(await this.appJwt(), "/app");
+    if (typeof app.slug !== "string" || !/^[A-Za-z0-9-]{1,100}$/.test(app.slug)) {
+      throw new Error("GitHub App has no valid slug");
+    }
+    const user = await this.request<{ id: number; type: string }>(await this.installationToken(),
+      "/users/" + encodeURIComponent(app.slug + "[bot]"));
+    if (user.type !== "Bot" || !Number.isSafeInteger(user.id) || user.id <= 0) {
+      throw new Error("GitHub App bot account has no valid user ID");
+    }
+    return user.id;
+  }
+
+  async installationToken(scope: "delivery" | "issues" = "delivery"): Promise<string> {
+    const cached = this.tokens.get(scope);
+    if (cached && cached.expires > Date.now() + 60_000) return cached.value;
+    const jwt = await this.appJwt();
     const installation = await this.request<{ id: number }>(jwt, `/repos/${this.repository}/installation`);
-    const permissions = { contents: "write", pull_requests: "write" };
+    const permissions: Record<string, string> = scope === "issues"
+      ? { issues: "write" } : { contents: "write", pull_requests: "write" };
     const issued = await this.request<{ token: string; expires_at: string; permissions: Record<string, string> }>(
       jwt, `/app/installations/${installation.id}/access_tokens`,
       { repositories: [this.repository.split("/")[1]], permissions },
@@ -67,12 +86,17 @@ export class GitHub {
         Object.entries(permissions).some(([name, access]) => issued.permissions[name] !== access)) {
       throw new Error("GitHub App credentials lack repository-scoped access");
     }
-    this.token = { value: issued.token, expires: Date.parse(issued.expires_at) };
+    this.tokens.set(scope, { value: issued.token, expires: Date.parse(issued.expires_at) });
     return issued.token;
   }
 
   async repo<T>(path: string, body?: unknown): Promise<T> {
     return this.request(await this.installationToken(), `/repos/${this.repository}${path}`, body);
+  }
+
+  async postIssueComment(issue: Issue, body: string): Promise<GitHubComment> {
+    return this.request(await this.installationToken("issues"),
+      `/repos/${this.repository}${this.issuePath(issue)}/comments`, { body });
   }
 
   async *comments(issue: Issue): AsyncGenerator<GitHubComment> {

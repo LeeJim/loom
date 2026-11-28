@@ -26,8 +26,9 @@ authorization, and CI matching. It uses transient test persistence.
    `TEMPORAL_NAMESPACE` and `LOOM_TEMPORAL_QUEUE` as needed. The default
    local address is `127.0.0.1:7233`. Use an isolated PostgreSQL-backed
    Temporal service when testing server restart and operational recovery.
-2. Set `LOOM_TEMPORAL_REPOSITORY` to the test repository, and
-   `LOOM_TEMPORAL_GITHUB_BOT` to the installed GitHub App's bot login.
+2. Set `LOOM_TEMPORAL_REPOSITORY` to the test repository. The configured
+   GitHub App resolves its bot account from GitHub and validates its numeric
+   account ID when posting or recovering comments.
    Provide the App settings at the absolute `LOOM_GITHUB_APP_CONFIG` path.
    Use the existing Loom App JSON shape with a private PEM.
 3. Set `LOOM_TEMPORAL_PROFILES` to an absolute JSON path mapping Issue
