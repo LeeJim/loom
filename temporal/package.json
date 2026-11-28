@@ -4,6 +4,7 @@
   "scripts": {
     "test": "npm run build && node --test dist/*.test.js",
     "build": "tsc -p tsconfig.json",
+    "experiment": "node dist/experiment-run.js",
     "pilot:controller": "node dist/pilot-controller.js",
     "pilot:worker": "node dist/pilot-worker.js",
     "pilot:start": "node dist/pilot-start.js"

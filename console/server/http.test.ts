@@ -169,3 +169,27 @@ test("Worker actions enforce same-origin and authenticated ownership", async () 
     assert.equal(JSON.parse((await http.call("/api/snapshot?view=logs&source=worker")).text).entries.length, 0);
   } finally { await http.close(); await data.cleanup(); }
 });
+
+test("experiment reports are surfaced through the existing protected read endpoint", async () => {
+  const data = await fixture();
+  const db = new DatabaseSync(data.path);
+  db.exec("CREATE TABLE planning_experiment_reports(id TEXT PRIMARY KEY,report TEXT,recorded_at TEXT DEFAULT CURRENT_TIMESTAMP)");
+  db.prepare("INSERT INTO planning_experiment_reports(id,report) VALUES(?,?)")
+    .run("trial", JSON.stringify({ id: "trial", results: [] }));
+  db.close();
+  const previous = process.env.LOOM_EXPERIMENT_CONSOLE_DB;
+  process.env.LOOM_EXPERIMENT_CONSOLE_DB = data.path;
+  const http = await client(data.path, new OAuth("https://console.test"));
+  try {
+    const response = await http.call("/api/snapshot?view=experiments");
+    assert.equal(response.status, 200);
+    assert.equal(JSON.parse(response.text).reports[0].id, "trial");
+    assert.equal((await http.call("/api/snapshot?view=experiments", { host: "console.test" })).status, 401);
+    assert.equal((await http.call("/console/experiments")).status, 200);
+  } finally {
+    if (previous === undefined) delete process.env.LOOM_EXPERIMENT_CONSOLE_DB;
+    else process.env.LOOM_EXPERIMENT_CONSOLE_DB = previous;
+    await http.close();
+    await data.cleanup();
+  }
+});
