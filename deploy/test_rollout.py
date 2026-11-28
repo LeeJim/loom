@@ -37,7 +37,7 @@ class RolloutTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[:2], ("docker", "rm"))
 
     def test_failed_health_restores_existing_overrides_and_container(self):
-        worker = self.systemd / "ai-native-worker.service.d/loom-release.conf"
+        worker = self.systemd / "loom-worker.service.d/loom-release.conf"
         worker.parent.mkdir(parents=True)
         worker.write_text("previous override")
         with (
@@ -48,9 +48,9 @@ class RolloutTests(unittest.TestCase):
         ):
             rollout.rollout(self.source, "b" * 40)
         self.assertEqual(worker.read_text(), "previous override")
-        self.assertFalse((self.systemd / "ai-native-console.service.d/loom-release.conf").exists())
-        cleanup.assert_called_once_with(["docker", "rm", "-f", "ai-native-controller"], check=False)
-        run.assert_any_call("docker", "start", "ai-native-controller")
+        self.assertFalse((self.systemd / "loom-console.service.d/loom-release.conf").exists())
+        cleanup.assert_called_once_with(["docker", "rm", "-f", "loom-controller"], check=False)
+        run.assert_any_call("docker", "start", "loom-controller")
 
     def test_active_execution_does_not_stop_services(self):
         with closing(sqlite3.connect(self.root / "data/workflow.sqlite")) as db, db:

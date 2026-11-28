@@ -1,4 +1,4 @@
-"""Roll out a verified Loom revision on the existing ai-native host."""
+"""Roll out a verified Loom revision on the existing loom host."""
 from contextlib import closing
 import json
 from pathlib import Path
@@ -11,10 +11,10 @@ import tempfile
 import time
 from urllib.request import urlopen
 
-ROOT = Path("/opt/ai-native")
+ROOT = Path("/opt/loom")
 RELEASES = ROOT / "loom-releases"
-SERVICES = {"ai-native-worker": "worker.py", "ai-native-console": "console/server.py"}
-CONTROLLER = "ai-native-controller"
+SERVICES = {"loom-worker": "worker.py", "loom-console": "console/server.py"}
+CONTROLLER = "loom-controller"
 SYSTEMD = Path("/etc/systemd/system")
 
 
@@ -86,7 +86,7 @@ def rollout(source, revision):
     replaced = False
     previous_stopped = False
     try:
-        run("systemctl", "stop", "ai-native-worker")
+        run("systemctl", "stop", "loom-worker")
         run("docker", "stop", CONTROLLER)
         previous_stopped = True
         run("docker", "rename", CONTROLLER, backup_name)
@@ -100,9 +100,9 @@ def rollout(source, revision):
             config = f"[Service]\nWorkingDirectory={release}\nExecStart=\nExecStart=/usr/bin/python3 {release / module}\n"
             replace_file(target, config.encode())
         run("systemctl", "daemon-reload")
-        run("systemctl", "restart", "ai-native-worker", "ai-native-console")
+        run("systemctl", "restart", "loom-worker", "loom-console")
         healthy("http://127.0.0.1:8790/api/snapshot", lambda body: "jobs" in body and "metrics" in body)
-        run("systemctl", "is-active", "ai-native-worker", "ai-native-console")
+        run("systemctl", "is-active", "loom-worker", "loom-console")
     except Exception:
         if replaced:
             subprocess.run(["docker", "rm", "-f", CONTROLLER], check=False)
@@ -115,7 +115,7 @@ def rollout(source, revision):
             else:
                 replace_file(target, previous)
         run("systemctl", "daemon-reload")
-        run("systemctl", "restart", "ai-native-worker", "ai-native-console")
+        run("systemctl", "restart", "loom-worker", "loom-console")
         raise
     # The previous revision can still be inspected by immutable release SHA.
     run("docker", "rm", backup_name)

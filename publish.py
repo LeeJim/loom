@@ -32,13 +32,13 @@ def prepare(number, data, approved_files, checkout, *, repository=REPO):
         raise ValueError("Delivery patch changed file types or modes")
     command("git", "diff", "--cached", "--check", cwd=checkout)
     env = os.environ | {
-        "GIT_AUTHOR_NAME": "ai-native", "GIT_COMMITTER_NAME": "ai-native",
-        "GIT_AUTHOR_EMAIL": "ai-native@users.noreply.github.com",
-        "GIT_COMMITTER_EMAIL": "ai-native@users.noreply.github.com",
+        "GIT_AUTHOR_NAME": "loom", "GIT_COMMITTER_NAME": "loom",
+        "GIT_AUTHOR_EMAIL": "loom@users.noreply.github.com",
+        "GIT_COMMITTER_EMAIL": "loom@users.noreply.github.com",
         "GIT_AUTHOR_DATE": metadata["created_at"], "GIT_COMMITTER_DATE": metadata["created_at"],
     }
     command("git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false",
-            "commit", "-m", f"ai-native: implement issue #{number}", cwd=checkout, env=env)
+            "commit", "-m", f"loom: implement issue #{number}", cwd=checkout, env=env)
     return command("git", "rev-parse", "HEAD", cwd=checkout).strip(), metadata["sha256"]
 
 
@@ -47,7 +47,7 @@ def verify_publish_label(db, number, token):
     if enabled != (1,):
         raise ValueError("Issue publication authorization was revoked")
     issue = github(token, f"/issues/{number}")
-    if issue["state"] != "open" or not any(label["name"] == "ai-native:publish" for label in issue["labels"]):
+    if issue["state"] != "open" or not any(label["name"] == "loom:publish" for label in issue["labels"]):
         raise ValueError("The open Issue must still carry the publishing label")
 
 
@@ -55,7 +55,7 @@ def publish(db, number, data, approved_files, app_config, *, require_label=False
     with tempfile.TemporaryDirectory(dir=ROOT, prefix="publish-") as temp:
         checkout = Path(temp) / "checkout"
         sha, digest = prepare(number, data, approved_files, checkout)
-        branch = f"codex/ai-native-issue-{number}-{digest[:12]}"
+        branch = f"codex/loom-issue-{number}-{digest[:12]}"
         token = installation_token(app_config)
         if require_label:
             verify_publish_label(db, number, token)
@@ -80,8 +80,8 @@ def publish(db, number, data, approved_files, app_config, *, require_label=False
             if require_label:
                 verify_publish_label(db, number, token)
             pr = github(token, "/pulls", body={
-                "title": f"ai-native: Issue #{number}", "head": branch, "base": "main", "draft": True,
-                "body": f"关联 #{number}。由 ai-native 沙箱生成并通过本地补丁检查。",
+                "title": f"loom: Issue #{number}", "head": branch, "base": "main", "draft": True,
+                "body": f"关联 #{number}。由 loom 沙箱生成并通过本地补丁检查。",
             })
         pr_number = pr["number"]
         url = f"https://github.com/{REPOSITORY}/pull/{pr_number}"

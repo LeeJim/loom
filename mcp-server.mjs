@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 
 const tool = {
   name: 'workflow_stages',
-  description: 'List the supported ai-native workflow stages.',
+  description: 'List the supported loom workflow stages.',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 };
@@ -42,7 +42,7 @@ createServer(async (req, res) => {
     case 'initialize':
       result = {
         protocolVersion: '2025-03-26', capabilities: { tools: {} },
-        serverInfo: { name: 'ai-native-workflow', version: '1.0.0' },
+        serverInfo: { name: 'loom-workflow', version: '1.0.0' },
       };
       break;
     case 'ping':

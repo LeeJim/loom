@@ -11,7 +11,7 @@ import time
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 REPOSITORY = "LeeJim/HowToCookOnMiniprogram"
-DEFAULT_CONFIG = Path("/opt/ai-native/secrets/github-app.json")
+DEFAULT_CONFIG = Path("/opt/loom/secrets/github-app.json")
 PERMISSIONS = {"contents": "write", "pull_requests": "write"}
 
 
@@ -26,7 +26,7 @@ def api(token, path, *, body=None):
         data=json.dumps(body).encode() if body is not None else None,
         headers={
             "Accept": "application/vnd.github+json", "Authorization": "Bearer " + token,
-            "Content-Type": "application/json", "User-Agent": "ai-native-publisher",
+            "Content-Type": "application/json", "User-Agent": "loom-publisher",
             "X-GitHub-Api-Version": "2026-03-10",
         },
     )

@@ -9,7 +9,7 @@ import sqlite3
 from urllib.parse import urlsplit
 
 ASSETS = Path(__file__).resolve().parent
-DB = Path(os.environ.get("AI_NATIVE_DB", "/opt/ai-native/data/workflow.sqlite"))
+DB = Path(os.environ.get("LOOM_DB", "/opt/loom/data/workflow.sqlite"))
 
 
 def snapshot():
@@ -180,4 +180,4 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("AI_NATIVE_CONSOLE_PORT", "8790"))), Handler).serve_forever()
+    ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("LOOM_CONSOLE_PORT", "8790"))), Handler).serve_forever()

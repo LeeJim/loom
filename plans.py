@@ -77,18 +77,18 @@ def review(db, number, paths, app_config):
         row = (plan_id, title, body, profile, base, plan, None, 'posting', 0)
     plan_id, _, _, _, base, plan, posted_at, state, _ = row
     if state == "posting":
-        marker = f"<!-- ai-native-plan:{plan_id} -->"
+        marker = f"<!-- loom-plan:{plan_id} -->"
         comments = api(token, endpoint + "/comments?per_page=100")
         comment = next((item for item in comments
                         if item["user"]["login"] == BOT and marker in item["body"]), None)
         if comment is None:
             safe_plan = plan.replace("```", "'''")
             comment = api(token, endpoint + "/comments", body={"body": (
-                f"{marker}\n## ai-native 实现方案\n\n"
+                f"{marker}\n## loom 实现方案\n\n"
                 f"允许修改：{', '.join(paths)}\n\n"
                 f"```text\n{safe_plan}\n```\n\n"
-                f"如同意本版方案，请回复 `/ai-native approve {plan_id}`。"
-                "收到确认后才会修改代码。草稿 PR 的发布仍使用 `ai-native:publish` 标签。"
+                f"如同意本版方案，请回复 `/loom approve {plan_id}`。"
+                "收到确认后才会修改代码。草稿 PR 的发布仍使用 `loom:publish` 标签。"
             )})
         if comment["user"]["login"] != BOT:
             raise ValueError("Plan comment was not authored by the GitHub App")
@@ -106,7 +106,7 @@ def review(db, number, paths, app_config):
                          if item["user"]["id"] == OWNER_ID and item["user"]["type"] == "User"
                          and item["created_at"] >= posted_at
                          and item["created_at"] == item["updated_at"]
-                         and item["body"].strip() == f"/ai-native approve {plan_id}"), None)
+                         and item["body"].strip() == f"/loom approve {plan_id}"), None)
         if approval is None:
             if state == "approved":
                 with db:
