@@ -1,5 +1,5 @@
 [Unit]
-Description=loom workflow operations console
+Description=Loom development workflow console
 After=network.target
 
 [Service]

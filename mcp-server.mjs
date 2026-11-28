@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 
 const tool = {
   name: 'workflow_stages',
-  description: 'List the supported loom workflow stages.',
+  description: "List the stages of Loom's agent-driven development workflow.",
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 };
